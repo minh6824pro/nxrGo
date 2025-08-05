@@ -1,0 +1,12 @@
+# .gitignore cho project Go
+
+/bin/
+/vendor/
+*.exe
+*.log
+*.out
+*.test
+*.swp
+.idea/
+.DS_Store
+.env
