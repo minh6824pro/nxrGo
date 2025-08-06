@@ -13,7 +13,7 @@ func main() {
 	config.LoadEnv()
 	database.ConnectDatabase()
 
-	//config.AutoMigrate()
+	config.AutoMigrate()
 
 	r := gin.Default()
 
@@ -25,5 +25,6 @@ func main() {
 	routes.RegisterBrandRoutes(api, db)
 	routes.RegisterCategoryRoutes(api, db)
 	routes.RegisterProductRoutes(api, db)
+	routes.RegisterVariantRoutes(api, db)
 	r.Run(":8080")
 }

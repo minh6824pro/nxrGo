@@ -2,6 +2,8 @@ package impl
 
 import (
 	"context"
+	customErr "github.com/minh6824pro/nxrGO/errors"
+	"net/http"
 
 	"github.com/minh6824pro/nxrGO/models"
 	"github.com/minh6824pro/nxrGO/repositories"
@@ -61,7 +63,7 @@ func (r *productGormRepository) List(ctx context.Context) ([]models.Product, err
 		Preload("Brand").
 		Preload("Category").
 		Find(&products).Error; err != nil {
-		return nil, err
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
 	}
 
 	return products, nil

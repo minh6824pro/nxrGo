@@ -22,7 +22,7 @@ func (r *productVariantRepository) Create(ctx context.Context, variant *models.P
 	return variant, nil
 }
 
-func (r *productVariantRepository) FindByID(ctx context.Context, id uint) (*models.ProductVariant, error) {
+func (r *productVariantRepository) GetByID(ctx context.Context, id uint) (*models.ProductVariant, error) {
 	var variant models.ProductVariant
 	err := r.db.WithContext(ctx).
 		Preload("Options").
@@ -41,7 +41,7 @@ func (r *productVariantRepository) Delete(ctx context.Context, id uint) error {
 	return r.db.WithContext(ctx).Delete(&models.ProductVariant{}, id).Error
 }
 
-func (r *productVariantRepository) FindAll(ctx context.Context) ([]models.ProductVariant, error) {
+func (r *productVariantRepository) List(ctx context.Context) ([]models.ProductVariant, error) {
 	var variants []models.ProductVariant
 	err := r.db.WithContext(ctx).
 		Preload("Options").

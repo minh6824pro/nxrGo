@@ -3,6 +3,9 @@ package controllers
 import (
 	"errors"
 	"fmt"
+	"github.com/minh6824pro/nxrGO/dto"
+	customErr "github.com/minh6824pro/nxrGO/errors"
+	"github.com/minh6824pro/nxrGO/utils"
 	"io"
 	"net/http"
 	"strconv"
@@ -22,18 +25,27 @@ func NewBrandController(s services.BrandService) *BrandController {
 }
 
 func (c *BrandController) Create(ctx *gin.Context) {
-	var b models.Brand
+	var b dto.CreateBrandInput
 	if err := ctx.ShouldBindJSON(&b); err != nil {
+
 		if errors.Is(err, io.EOF) {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Request body is empty"})
+			customErr.WriteError(ctx, customErr.NewError(
+				customErr.BAD_REQUEST,
+				"Request body is empty",
+				http.StatusBadRequest,
+				err,
+			))
 			return
 		}
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if utils.HandleValidationError(ctx, err) {
+			return
+		}
+
 		return
 	}
 	createdBrand, err := c.service.Create(ctx.Request.Context(), &b)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		customErr.WriteError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusCreated, createdBrand)
@@ -43,11 +55,7 @@ func (c *BrandController) GetByID(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 	b, err := c.service.GetByID(ctx.Request.Context(), uint(id))
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Brand with id %d not found", id)})
-			return
-		}
-		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		customErr.WriteError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, b)
@@ -102,21 +110,26 @@ func (c *BrandController) List(ctx *gin.Context) {
 func (c *BrandController) Patch(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 
-	var updates map[string]interface{}
-	if err := ctx.ShouldBindJSON(&updates); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	category, err := c.service.Patch(ctx.Request.Context(), uint(id), updates)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Brand with id %d not found", id)})
+	var input dto.UpdateMerchantInput
+	if err := ctx.ShouldBindJSON(&input); err != nil {
+		if errors.Is(err, io.EOF) {
+			customErr.WriteError(ctx, customErr.NewError(
+				customErr.BAD_REQUEST,
+				"Request body is empty",
+				http.StatusBadRequest,
+				err,
+			))
 			return
 		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		utils.HandleValidationError(ctx, err)
 		return
 	}
 
-	ctx.JSON(http.StatusOK, category)
+	updated, err := c.service.Patch(ctx.Request.Context(), uint(id), &input)
+	if err != nil {
+		customErr.WriteError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, updated)
 }

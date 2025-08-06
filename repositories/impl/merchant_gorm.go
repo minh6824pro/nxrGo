@@ -74,7 +74,7 @@ func (r *merchantGormRepository) Delete(ctx context.Context, id uint) error {
 func (r *merchantGormRepository) List(ctx context.Context) ([]models.Merchant, error) {
 	var list []models.Merchant
 	if err := r.db.WithContext(ctx).Find(&list).Error; err != nil {
-		return nil, err
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
 	}
 	return list, nil
 }

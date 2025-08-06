@@ -17,7 +17,7 @@ func NewMerchantService(repo repositories.MerchantRepository) services.MerchantS
 }
 
 func (merchantService *merchantService) Create(ctx context.Context, m *dto.CreateMerchantInput) (*models.Merchant, error) {
-	return merchantService.repo.Create(ctx, MerchantInputDtoMapper(m))
+	return merchantService.repo.Create(ctx, CreateMerchantInputDtoMapper(m))
 }
 
 func (merchantService *merchantService) GetByID(ctx context.Context, id uint) (*models.Merchant, error) {
@@ -70,7 +70,13 @@ func (merchantService *merchantService) Patch(ctx context.Context, id uint, inpu
 	return existing, nil
 }
 
-func MerchantInputDtoMapper(m *dto.CreateMerchantInput) *models.Merchant {
+func CreateMerchantInputDtoMapper(m *dto.CreateMerchantInput) *models.Merchant {
+	return &models.Merchant{
+		Name: m.Name,
+	}
+}
+
+func UpdateMerchantInputDtoMapper(m *dto.CreateMerchantInput) *models.Merchant {
 	return &models.Merchant{
 		Name: m.Name,
 	}
