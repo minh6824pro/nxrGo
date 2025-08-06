@@ -13,7 +13,7 @@ func main() {
 	config.LoadEnv()
 	database.ConnectDatabase()
 
-	config.AutoMigrate()
+	//config.AutoMigrate()
 
 	r := gin.Default()
 

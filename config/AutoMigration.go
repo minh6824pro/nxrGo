@@ -13,6 +13,9 @@ func AutoMigrate() {
 		&models.Merchant{},
 		&models.Brand{},
 		&models.Category{},
+		&models.ProductVariant{},
+		&models.VariantOption{},
+		&models.VariantOptionValue{},
 	)
 
 	if err != nil {
