@@ -3,6 +3,7 @@ package repositories
 import (
 	"context"
 	"github.com/minh6824pro/nxrGO/models"
+	"gorm.io/gorm"
 )
 
 type MerchantRepository interface {
@@ -12,4 +13,6 @@ type MerchantRepository interface {
 	Delete(ctx context.Context, id uint) error
 	List(ctx context.Context) ([]models.Merchant, error)
 	GetByName(ctx context.Context, name string) (*models.Merchant, error)
+	GetByNameTx(ctx context.Context, tx *gorm.DB, name string) (*models.Merchant, error)
+	CreateTx(ctx context.Context, tx *gorm.DB, merchant *models.Merchant) (*models.Merchant, error)
 }

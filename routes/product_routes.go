@@ -13,8 +13,11 @@ func RegisterProductRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 	merchantRepo := repoImpl.NewMerchantGormRepository(db)
 	categoryRepo := repoImpl.NewCategoryGormRepository(db)
 	brandRepo := repoImpl.NewBrandGormRepository(db)
+	productVariantRepo := repoImpl.NewProductVariantGormRepository(db)
+	variantOptionRepo := repoImpl.NewVariantOptionGormRepository(db)
+	variantOptionValueRepo := repoImpl.NewVariantOptionValueGormRepository(db)
 
-	productService := serviceImpl.NewProductService(productRepo, brandRepo, merchantRepo, categoryRepo)
+	productService := serviceImpl.NewProductService(db, productRepo, brandRepo, merchantRepo, categoryRepo, productVariantRepo, variantOptionValueRepo, variantOptionRepo)
 
 	productController := controllers.NewProductController(productService)
 

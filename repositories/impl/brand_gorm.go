@@ -32,6 +32,19 @@ func (r *brandGormRepository) Create(ctx context.Context, b *models.Brand) (*mod
 	return b, nil
 }
 
+func (r *brandGormRepository) CreateTx(ctx context.Context, tx *gorm.DB, b *models.Brand) (*models.Brand, error) {
+	if err := tx.WithContext(ctx).Create(b).Error; err != nil {
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) {
+			if mysqlErr.Number == 1062 {
+				return nil, customErr.NewError(customErr.DUPLICATED_ERROR, "Brand already exists", http.StatusBadRequest, nil)
+			}
+		}
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+	}
+	return b, nil
+}
+
 func (r *brandGormRepository) GetByID(ctx context.Context, id uint) (*models.Brand, error) {
 	var b models.Brand
 	if err := r.db.WithContext(ctx).First(&b, id).Error; err != nil {
@@ -81,6 +94,14 @@ func (r *brandGormRepository) GetByName(ctx context.Context, name string) (*mode
 	var b models.Brand
 	if err := r.db.WithContext(ctx).Where("name = ?", name).First(&b).Error; err != nil {
 		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+	}
+	return &b, nil
+}
+
+func (r *brandGormRepository) GetByNameTx(ctx context.Context, tx *gorm.DB, name string) (*models.Brand, error) {
+	var b models.Brand
+	if err := tx.WithContext(ctx).Where("name = ?", name).First(&b).Error; err != nil {
+		return nil, err
 	}
 	return &b, nil
 }

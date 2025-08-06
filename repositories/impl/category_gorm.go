@@ -32,6 +32,18 @@ func (r *categoryGormRepository) Create(ctx context.Context, c *models.Category)
 	return c, nil
 }
 
+func (r *categoryGormRepository) CreateTx(ctx context.Context, tx *gorm.DB, c *models.Category) (*models.Category, error) {
+	if err := tx.WithContext(ctx).Create(c).Error; err != nil {
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+			return nil, customErr.NewError(customErr.DUPLICATED_ERROR, "Category already exists", http.StatusBadRequest, nil)
+		}
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+
+	}
+	return c, nil
+}
+
 func (r *categoryGormRepository) GetByID(ctx context.Context, id uint) (*models.Category, error) {
 	var c models.Category
 	if err := r.db.WithContext(ctx).First(&c, id).Error; err != nil {
@@ -79,6 +91,14 @@ func (r *categoryGormRepository) List(ctx context.Context) ([]models.Category, e
 func (r *categoryGormRepository) GetByName(ctx context.Context, name string) (*models.Category, error) {
 	var c models.Category
 	if err := r.db.WithContext(ctx).Where("name = ?", name).First(&c).Error; err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+func (r *categoryGormRepository) GetByNameTx(ctx context.Context, tx *gorm.DB, name string) (*models.Category, error) {
+	var c models.Category
+	if err := tx.WithContext(ctx).Where("name = ?", name).First(&c).Error; err != nil {
 		return nil, err
 	}
 	return &c, nil

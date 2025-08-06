@@ -9,6 +9,6 @@ type ProductVariant struct {
 	Version   int     `gorm:"default:0" json:"version"`
 
 	// Relationships
-	Product Product              `gorm:"foreignKey:ProductID" json:"product,omitempty"`
-	Options []VariantOptionValue `gorm:"foreignKey:VariantID" json:"options,omitempty"`
+	Product      Product              `gorm:"foreignKey:ProductID" json:"-"`
+	OptionValues []VariantOptionValue `gorm:"foreignKey:VariantID" json:"options,omitempty"`
 }

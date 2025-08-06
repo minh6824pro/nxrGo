@@ -11,7 +11,7 @@ type productVariantRepository struct {
 	db *gorm.DB
 }
 
-func NewProductVariantRepository(db *gorm.DB) repositories.ProductVariantRepository {
+func NewProductVariantGormRepository(db *gorm.DB) repositories.ProductVariantRepository {
 	return &productVariantRepository{db: db}
 }
 
@@ -22,6 +22,12 @@ func (r *productVariantRepository) Create(ctx context.Context, variant *models.P
 	return variant, nil
 }
 
+func (r *productVariantRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, variant *models.ProductVariant) (*models.ProductVariant, error) {
+	if err := tx.WithContext(ctx).Create(variant).Error; err != nil {
+		return nil, err
+	}
+	return variant, nil
+}
 func (r *productVariantRepository) GetByID(ctx context.Context, id uint) (*models.ProductVariant, error) {
 	var variant models.ProductVariant
 	err := r.db.WithContext(ctx).

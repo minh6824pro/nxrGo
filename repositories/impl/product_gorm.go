@@ -33,6 +33,13 @@ func (r *productGormRepository) Create(ctx context.Context, p *models.Product) (
 
 	return p, nil
 }
+func (r *productGormRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, p *models.Product) (*models.Product, error) {
+	if err := tx.WithContext(ctx).Create(p).Error; err != nil {
+		return nil, err
+	}
+
+	return p, nil
+}
 
 func (r *productGormRepository) GetByID(ctx context.Context, id uint) (*models.Product, error) {
 	var p models.Product
@@ -40,6 +47,9 @@ func (r *productGormRepository) GetByID(ctx context.Context, id uint) (*models.P
 		Preload("Brand").
 		Preload("Merchant").
 		Preload("Category").
+		Preload("Variants").
+		Preload("Variants.OptionValues").
+		Preload("Variants.OptionValues.Option").
 		First(&p, id).Error
 
 	if err != nil {
@@ -62,6 +72,9 @@ func (r *productGormRepository) List(ctx context.Context) ([]models.Product, err
 		Preload("Merchant").
 		Preload("Brand").
 		Preload("Category").
+		Preload("Variants").
+		Preload("Variants.OptionValues").
+		Preload("Variants.OptionValues.Option").
 		Find(&products).Error; err != nil {
 		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
 	}

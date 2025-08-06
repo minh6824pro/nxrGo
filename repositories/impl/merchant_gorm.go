@@ -32,6 +32,19 @@ func (r *merchantGormRepository) Create(ctx context.Context, m *models.Merchant)
 	return m, nil
 }
 
+func (r *merchantGormRepository) CreateTx(ctx context.Context, tx *gorm.DB, m *models.Merchant) (*models.Merchant, error) {
+	if err := tx.WithContext(ctx).Create(m).Error; err != nil {
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) {
+			if mysqlErr.Number == 1062 {
+				return nil, customErr.NewError(customErr.DUPLICATED_ERROR, "Merchant already exists", http.StatusBadRequest, nil)
+			}
+		}
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+	}
+	return m, nil
+}
+
 func (r *merchantGormRepository) GetByID(ctx context.Context, id uint) (*models.Merchant, error) {
 	var m models.Merchant
 	if err := r.db.WithContext(ctx).First(&m, id).Error; err != nil {
@@ -82,6 +95,14 @@ func (r *merchantGormRepository) List(ctx context.Context) ([]models.Merchant, e
 func (r *merchantGormRepository) GetByName(ctx context.Context, name string) (*models.Merchant, error) {
 	var m models.Merchant
 	if err := r.db.WithContext(ctx).Where("name = ?", name).First(&m).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+func (r *merchantGormRepository) GetByNameTx(ctx context.Context, tx *gorm.DB, name string) (*models.Merchant, error) {
+	var m models.Merchant
+	if err := tx.WithContext(ctx).Where("name = ?", name).First(&m).Error; err != nil {
 		return nil, err
 	}
 	return &m, nil

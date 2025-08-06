@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"gorm.io/gorm"
 
 	"github.com/minh6824pro/nxrGO/models"
 )
@@ -13,4 +14,6 @@ type BrandRepository interface {
 	Delete(ctx context.Context, id uint) error
 	List(ctx context.Context) ([]models.Brand, error)
 	GetByName(ctx context.Context, name string) (*models.Brand, error)
+	CreateTx(ctx context.Context, tx *gorm.DB, brand *models.Brand) (*models.Brand, error)
+	GetByNameTx(ctx context.Context, tx *gorm.DB, name string) (*models.Brand, error)
 }

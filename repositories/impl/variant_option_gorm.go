@@ -42,6 +42,18 @@ func (r *variantOptionGormRepository) GetByID(ctx context.Context, id uint) (*mo
 	return &option, nil
 }
 
+func (r *variantOptionGormRepository) GetByIDTx(ctx context.Context, tx *gorm.DB, id uint) (*models.VariantOption, error) {
+	var option models.VariantOption
+	if err := tx.WithContext(ctx).First(&option, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Variant option not found", http.StatusBadRequest, nil)
+		}
+
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+	}
+	return &option, nil
+}
+
 func (r *variantOptionGormRepository) Delete(ctx context.Context, id uint) error {
 	if err := r.db.WithContext(ctx).Delete(&models.VariantOption{}, id).Error; err != nil {
 		var mysqlErr *mysql.MySQLError

@@ -3,10 +3,12 @@ package repositories
 import (
 	"context"
 	"github.com/minh6824pro/nxrGO/models"
+	"gorm.io/gorm"
 )
 
 type ProductRepository interface {
 	Create(ctx context.Context, c *models.Product) (*models.Product, error)
+	CreateWithTx(ctx context.Context, tx *gorm.DB, c *models.Product) (*models.Product, error)
 	GetByID(ctx context.Context, id uint) (*models.Product, error)
 	Update(ctx context.Context, c *models.Product) error
 	Delete(ctx context.Context, id uint) error

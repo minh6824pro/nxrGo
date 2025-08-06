@@ -18,10 +18,10 @@ type Product struct {
 	Active        bool    `gorm:"default:true" json:"active"`
 
 	// Relationships
-	Merchant Merchant         `gorm:"foreignKey:MerchantID" json:"merchant"`
-	Brand    Brand            `gorm:"foreignKey:BrandID" json:"brand"`
-	Category Category         `gorm:"foreignKey:CategoryID" json:"category"`
-	Variants []ProductVariant `gorm:"foreignKey:ProductID" json:"variants,omitempty"`
+	Merchant Merchant         `gorm:"foreignKey:MerchantID;references:ID" json:"merchant"`
+	Brand    Brand            `gorm:"foreignKey:BrandID;references:ID" json:"brand"`
+	Category Category         `gorm:"foreignKey:CategoryID;references:ID" json:"category"`
+	Variants []ProductVariant `gorm:"foreignKey:ProductID;references:ID" json:"variants,omitempty"`
 
 	// GORM default fields
 	CreatedAt time.Time      `json:"-"`
