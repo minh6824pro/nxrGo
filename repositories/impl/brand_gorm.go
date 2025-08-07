@@ -56,6 +56,17 @@ func (r *brandGormRepository) GetByID(ctx context.Context, id uint) (*models.Bra
 	return &b, nil
 }
 
+func (r *brandGormRepository) GetByIDTx(ctx context.Context, tx *gorm.DB, id uint) (*models.Brand, error) {
+	var b models.Brand
+	if err := tx.WithContext(ctx).First(&b, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Brand not found", http.StatusBadRequest, nil)
+		}
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+	}
+	return &b, nil
+}
+
 func (r *brandGormRepository) Update(ctx context.Context, b *models.Brand) error {
 	if err := r.db.WithContext(ctx).Save(b).Error; err != nil {
 		var mysqlErr *mysql.MySQLError

@@ -40,7 +40,7 @@ func (c *BrandController) Create(ctx *gin.Context) {
 		if utils.HandleValidationError(ctx, err) {
 			return
 		}
-
+		customErr.WriteError(ctx, err)
 		return
 	}
 	createdBrand, err := c.service.Create(ctx.Request.Context(), &b)

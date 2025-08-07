@@ -1,4 +1,4 @@
-package config
+package configs
 
 import (
 	"github.com/minh6824pro/nxrGO/database"
@@ -16,6 +16,9 @@ func AutoMigrate() {
 		&models.ProductVariant{},
 		&models.VariantOption{},
 		&models.VariantOptionValue{},
+		&models.Order{},
+		&models.OrderItem{},
+		&models.PaymentInfo{},
 	)
 
 	if err != nil {

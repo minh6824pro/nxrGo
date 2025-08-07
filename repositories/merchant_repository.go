@@ -9,6 +9,7 @@ import (
 type MerchantRepository interface {
 	Create(ctx context.Context, merchant *models.Merchant) (*models.Merchant, error)
 	GetByID(ctx context.Context, id uint) (*models.Merchant, error)
+	GetByIDTx(ctx context.Context, tx *gorm.DB, id uint) (*models.Merchant, error)
 	Update(ctx context.Context, merchant *models.Merchant) error
 	Delete(ctx context.Context, id uint) error
 	List(ctx context.Context) ([]models.Merchant, error)

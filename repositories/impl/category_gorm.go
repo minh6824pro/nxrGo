@@ -56,6 +56,18 @@ func (r *categoryGormRepository) GetByID(ctx context.Context, id uint) (*models.
 	return &c, nil
 }
 
+func (r *categoryGormRepository) GetByIDTx(ctx context.Context, tx *gorm.DB, id uint) (*models.Category, error) {
+	var c models.Category
+	if err := tx.WithContext(ctx).First(&c, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Category not found", http.StatusBadRequest, nil)
+		}
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+
+	}
+	return &c, nil
+}
+
 func (r *categoryGormRepository) Update(ctx context.Context, c *models.Category) error {
 	if err := r.db.WithContext(ctx).Save(c).Error; err != nil {
 		var mysqlErr *mysql.MySQLError

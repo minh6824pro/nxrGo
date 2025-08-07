@@ -13,7 +13,9 @@ import (
 	"net/http"
 )
 
-func NewProductService(db *gorm.DB, productRepo repositories.ProductRepository, brandRepo repositories.BrandRepository, merchanRepo repositories.MerchantRepository, categoryRepo repositories.CategoryRepository, productVariantRepo repositories.ProductVariantRepository, variantOptionValueRepo repositories.VariantOptionValueRepository, variantOptionRepo repositories.VariantOptionRepository) services.ProductService {
+func NewProductService(db *gorm.DB, productRepo repositories.ProductRepository, brandRepo repositories.BrandRepository, merchanRepo repositories.MerchantRepository,
+	categoryRepo repositories.CategoryRepository, productVariantRepo repositories.ProductVariantRepository, variantOptionValueRepo repositories.VariantOptionValueRepository,
+	variantOptionRepo repositories.VariantOptionRepository) services.ProductService {
 	return &productService{
 		db:                     db,
 		productRepo:            productRepo,
@@ -101,7 +103,7 @@ type productService struct {
 //		}
 //		return createdProduct, nil
 //	}
-func (productService *productService) Create(ctx context.Context, input dto.CreateProductInput) (*models.Product, error) {
+func (productService *productService) Create(ctx context.Context, input dto.CreateProductInput) (*uint, error) {
 	// ✅ Bắt đầu transaction
 	tx := productService.db.Begin()
 	if tx.Error != nil {
@@ -114,21 +116,33 @@ func (productService *productService) Create(ctx context.Context, input dto.Crea
 		}
 	}()
 
-	// ✅ Truyền tx vào các hàm getOrCreate*
-	brandID, err := productService.getOrCreateBrand(ctx, tx, input.BrandID, input.BrandName)
-	if err != nil {
+	//// ✅ Truyền tx vào các hàm getOrCreate*
+	//brandID, err := productService.getOrCreateBrand(ctx, tx, input.BrandID, input.BrandName)
+	//if err != nil {
+	//	tx.Rollback()
+	//	return nil, err
+	//}
+	if _, err := productService.brandRepo.GetByIDTx(ctx, tx, *input.BrandID); err != nil {
 		tx.Rollback()
 		return nil, err
 	}
 
-	categoryID, err := productService.getOrCreateCategory(ctx, tx, input.CategoryID, input.CategoryName)
-	if err != nil {
+	//categoryID, err := productService.getOrCreateCategory(ctx, tx, input.CategoryID, input.CategoryName)
+	//if err != nil {
+	//	tx.Rollback()
+	//	return nil, err
+	//}
+	if _, err := productService.categoryRepo.GetByIDTx(ctx, tx, *input.CategoryID); err != nil {
 		tx.Rollback()
 		return nil, err
 	}
+	//merchantID, err := productService.getOrCreateMerchant(ctx, tx, input.MerchantID, input.MerchantName)
+	//if err != nil {
+	//	tx.Rollback()
+	//	return nil, err
+	//}
 
-	merchantID, err := productService.getOrCreateMerchant(ctx, tx, input.MerchantID, input.MerchantName)
-	if err != nil {
+	if _, err := productService.merchantRepo.GetByIDTx(ctx, tx, *input.MerchantID); err != nil {
 		tx.Rollback()
 		return nil, err
 	}
@@ -137,9 +151,9 @@ func (productService *productService) Create(ctx context.Context, input dto.Crea
 		Name:          input.Name,
 		Description:   input.Description,
 		Image:         input.Image,
-		BrandID:       brandID,
-		CategoryID:    categoryID,
-		MerchantID:    merchantID,
+		BrandID:       *input.BrandID,
+		CategoryID:    *input.CategoryID,
+		MerchantID:    *input.MerchantID,
 		AverageRating: 0,
 		NumberRating:  0,
 		Active:        true,
@@ -203,7 +217,7 @@ func (productService *productService) Create(ctx context.Context, input dto.Crea
 	//	return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Failed to load full product", http.StatusInternalServerError, err)
 	//}
 
-	return createdProduct, nil
+	return &createdProduct.ID, nil
 }
 
 func (productService productService) GetByID(ctx context.Context, id uint) (*models.Product, error) {

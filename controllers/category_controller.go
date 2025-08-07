@@ -38,6 +38,7 @@ func (c *CategoryController) Create(ctx *gin.Context) {
 		if utils.HandleValidationError(ctx, err) {
 			return
 		}
+		customErr.WriteError(ctx, err)
 		return
 	}
 	createCate, err := c.service.Create(ctx.Request.Context(), &cat)

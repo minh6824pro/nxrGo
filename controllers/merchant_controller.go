@@ -34,28 +34,11 @@ func (c *MerchantController) Create(ctx *gin.Context) {
 			))
 			return
 		}
-		//var ve validator.ValidationErrors
-		//if errors.As(err, &ve) {
-		//	validationDetails := make([]map[string]string, len(ve))
-		//	for i, fe := range ve {
-		//		validationDetails[i] = map[string]string{
-		//			"field":   fe.Field(),
-		//			"message": fmt.Sprintf("%s is %s", fe.Field(), fe.Tag()),
-		//		}
-		//	}
-		//
-		//	customErr.WriteError(ctx, customErr.NewErrorWithMeta(
-		//		customErr.VALIDATION_ERROR,
-		//		"Invalid request body",
-		//		http.StatusBadRequest,
-		//		err,
-		//		map[string]any{"details": validationDetails},
-		//	))
-		//	return
-		//}
+
 		if utils.HandleValidationError(ctx, err) {
 			return
 		}
+		customErr.WriteError(ctx, err)
 		return
 	}
 	createMerchant, err := c.service.Create(ctx.Request.Context(), &m)

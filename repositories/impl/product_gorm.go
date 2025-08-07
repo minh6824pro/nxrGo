@@ -35,7 +35,7 @@ func (r *productGormRepository) Create(ctx context.Context, p *models.Product) (
 }
 func (r *productGormRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, p *models.Product) (*models.Product, error) {
 	if err := tx.WithContext(ctx).Create(p).Error; err != nil {
-		return nil, err
+		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected Error", http.StatusInternalServerError, err)
 	}
 
 	return p, nil

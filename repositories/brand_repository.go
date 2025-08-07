@@ -10,6 +10,7 @@ import (
 type BrandRepository interface {
 	Create(ctx context.Context, brand *models.Brand) (*models.Brand, error)
 	GetByID(ctx context.Context, id uint) (*models.Brand, error)
+	GetByIDTx(ctx context.Context, tx *gorm.DB, id uint) (*models.Brand, error)
 	Update(ctx context.Context, brand *models.Brand) error
 	Delete(ctx context.Context, id uint) error
 	List(ctx context.Context) ([]models.Brand, error)
