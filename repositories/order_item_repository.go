@@ -8,4 +8,5 @@ import (
 
 type OrderItemRepository interface {
 	CreateTx(ctx context.Context, tx *gorm.DB, orderItem *models.OrderItem) (*models.OrderItem, error)
+	Create(ctx context.Context, orderItem *models.OrderItem) error
 }

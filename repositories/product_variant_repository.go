@@ -11,6 +11,7 @@ type ProductVariantRepository interface {
 	CreateWithTx(ctx context.Context, tx *gorm.DB, variant *models.ProductVariant) (*models.ProductVariant, error)
 	GetByID(ctx context.Context, id uint) (*models.ProductVariant, error)
 	GetByIDNoPreload(ctx context.Context, id uint) (*models.ProductVariant, error)
+	GetByIDs(ctx context.Context, ids []uint) ([]models.ProductVariant, error)
 	CheckExistsAndQuantity(ctx context.Context, id uint, quantity uint) error
 	Update(ctx context.Context, variant *models.ProductVariant) error
 	Delete(ctx context.Context, id uint) error

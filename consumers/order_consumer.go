@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 	"log"
 	"net/http"
+	"time"
 )
 
 func StartOrderConsumer() {
@@ -32,21 +33,89 @@ func StartOrderConsumer() {
 				continue
 			}
 
-			err := processOrderMessage(orderMsg)
-			if err != nil {
-				orderMsg.RetryCount++
-				if orderMsg.RetryCount > 3 {
-					log.Printf("⚠️ Dropping order %d after 3 retries -> send to DLQ", orderMsg.OrderID)
-					d.Nack(false, false) // 👈 gửi sang DLQ
-				} else {
-					retryMessage(orderMsg)
-					d.Ack(false) // đã retry nên vẫn ack
+			// Xử lý với retry logic ngay trong consumer
+			success, finalErr := processOrderWithRetry(orderMsg)
+
+			// Gửi reply sau khi hoàn tất tất cả retry attempts
+			result := dto.OrderProcessingResult{
+				OrderID: orderMsg.OrderID,
+				Success: success,
+			}
+
+			if success {
+				// Load order đầy đủ thông tin để gửi về
+				var fullOrder models.Order
+				db := database.DB
+				if loadErr := db.Where("id = ?", orderMsg.OrderID).
+					Preload("OrderItems").
+					Preload("OrderItems.Variant").
+					Preload("OrderItems.Variant.Product").
+					Preload("PaymentInfo").
+					First(&fullOrder).Error; loadErr == nil {
+					result.OrderData = &fullOrder
 				}
 			} else {
-				d.Ack(false) // xử lý thành công
+				result.ErrorMessage = finalErr.Error()
+
+				// Gửi message vào DLQ để cleanup
+				dlqMsg, _ := json.Marshal(orderMsg)
+				configs.RMQChannel.Publish("", configs.OrderDLQ, false, false, amqp.Publishing{
+					ContentType: "application/json",
+					Body:        dlqMsg,
+				})
 			}
+
+			sendReply(d.ReplyTo, d.CorrelationId, result)
+			d.Ack(false)
 		}
 	}()
+}
+
+// Thêm hàm xử lý retry
+func processOrderWithRetry(msg dto.CreateOrderMessage) (bool, error) {
+	var lastErr error
+	maxRetries := 3
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			log.Printf("🔄 Retrying order %d (attempt %d/%d)", msg.OrderID, attempt, maxRetries)
+			time.Sleep(2 * time.Second) // Delay giữa các retry
+		}
+
+		err := processOrderMessage(msg)
+		if err == nil {
+			log.Printf("✅ Successfully processed order %d on attempt %d", msg.OrderID, attempt+1)
+			return true, nil
+		}
+
+		lastErr = err
+		log.Printf("❌ Order %d failed on attempt %d: %v", msg.OrderID, attempt+1, err)
+	}
+
+	log.Printf("⚠️ Order %d failed after %d attempts -> will be sent to DLQ", msg.OrderID, maxRetries+1)
+	return false, lastErr
+}
+
+func sendReply(replyTo, correlationID string, result dto.OrderProcessingResult) {
+	if replyTo == "" || correlationID == "" {
+		return // Không có reply queue hoặc correlation ID
+	}
+
+	body, _ := json.Marshal(result)
+	err := configs.RMQChannel.Publish(
+		"",
+		replyTo,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType:   "application/json",
+			Body:          body,
+			CorrelationId: correlationID,
+		},
+	)
+	if err != nil {
+		log.Printf("Failed to send reply: %v", err)
+	}
 }
 
 func processOrderMessage(msg dto.CreateOrderMessage) error {
@@ -58,11 +127,14 @@ func processOrderMessage(msg dto.CreateOrderMessage) error {
 			tx.Rollback()
 		}
 	}()
+
+	//tx.Rollback()
+	//return customErr.NewError(customErr.VERSION_CONFLICT, "Test order retry", http.StatusConflict, nil)
 	for _, item := range msg.Items {
 		var pv models.ProductVariant
 		if err := tx.First(&pv, item.ProductVariantID).Error; err != nil || pv.Quantity < item.Quantity {
 			tx.Rollback()
-			return err // báo lỗi để retry hoặc gửi DLQ
+			return err
 		}
 		pv.Quantity -= item.Quantity
 
@@ -78,8 +150,7 @@ func processOrderMessage(msg dto.CreateOrderMessage) error {
 			log.Println("Product variant : ", pv.ID, pv.Version, "Order", msg.OrderID, "conflicted")
 			return customErr.NewError(customErr.VERSION_CONFLICT, "Version Conflict", http.StatusConflict, nil)
 		}
-		//tx.Rollback()
-		//return customErr.NewError(customErr.VERSION_CONFLICT, "Version Conflict", http.StatusConflict, nil)
+
 		orderItem := &models.OrderItem{
 			OrderID:          msg.OrderID,
 			ProductVariantID: item.ProductVariantID,
@@ -136,6 +207,7 @@ func createPayment(orderID uint) {
 		log.Printf(err.Error(), "while creating payment link")
 		return
 	}
+
 	paymentLink := ""
 	if order.PaymentMethod == models.PaymentMethodBank {
 		paymentData, err := serviceImpl.CreatePayOSPayment(int(order.ID), order.Total+order.ShippingFee, MapOrderItemsToPayOSItems(order), "Thanh toán đơn hàng", "returnURL", "cancelURL")
@@ -169,7 +241,7 @@ func MapOrderItemsToPayOSItems(order models.Order) []payos.Item {
 	for _, oi := range order.OrderItems {
 		item := payos.Item{
 			Name:     fmt.Sprintf("%s (Variant #%d)", oi.Variant.Product.Name, oi.ProductVariantID),
-			Price:    int(oi.Price), // đảm bảo giá là số nguyên VND
+			Price:    int(oi.Price),
 			Quantity: int(oi.Quantity),
 		}
 		items = append(items, item)

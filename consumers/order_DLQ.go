@@ -34,24 +34,18 @@ func ConsumeOrderDLQ(orderRepo repositories.OrderRepository) {
 				log.Println("❌ Failed to unmarshal DLQ message:", err)
 				continue
 			}
-
-			// 💥 Log hoặc xử lý tùy ý
-			log.Printf("🪦 DLQ Received - OrderID: %d, RetryCount: %d", failedMsg.OrderID, failedMsg.RetryCount)
+			log.Printf("🪦 DLQ Received - OrderID: %d", failedMsg.OrderID)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			err := orderRepo.Delete(ctx, failedMsg.OrderID)
 			if err != nil {
 				parseErr := customErr.ParseError(err)
-				log.Println("Order DLQ cant delete", parseErr.Message, parseErr.Code)
+				log.Println("Order DLQ can't delete", parseErr.Message, parseErr.Code)
 				return
 			}
 
-			log.Printf("🪦 DLQ DELETED - OrderID: %d, RetryCount: %d", failedMsg.OrderID, failedMsg.RetryCount)
+			log.Printf("🪦 DLQ Order Deleted - OrderID: %d", failedMsg.OrderID)
 
-			// Bạn có thể:
-			// - Ghi vào DB lỗi
-			// - Gửi alert qua email/Slack
-			// - Cho phép retry thủ công
 		}
 	}()
 }

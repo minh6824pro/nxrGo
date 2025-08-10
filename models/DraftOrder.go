@@ -2,28 +2,7 @@ package models
 
 import "time"
 
-type OrderStatus string
-
-const (
-	OrderStatePending         OrderStatus = "PENDING"
-	OrderStateConfirmed       OrderStatus = "CONFIRMED"
-	OrderStateProcessing      OrderStatus = "PROCESSING"
-	OrderStateShipped         OrderStatus = "SHIPPED"
-	OrderStateDelivered       OrderStatus = "DELIVERED"
-	OrderStateCancelled       OrderStatus = "CANCELLED"
-	OrderStateReturnRequested OrderStatus = "RETURN_REQUESTED"
-	OrderStateReturned        OrderStatus = "RETURNED"
-	OrderStateRefunded        OrderStatus = "REFUNDED"
-)
-
-type PaymentMethod string
-
-const (
-	PaymentMethodCOD  PaymentMethod = "COD"
-	PaymentMethodBank PaymentMethod = "BANK"
-)
-
-type Order struct {
+type DraftOrder struct {
 	ID              uint          `gorm:"primaryKey" json:"id"`
 	UserID          uint          `gorm:"not null" json:"user_id"`
 	User            User          `gorm:"references:UserID" json:"-"`
@@ -36,7 +15,7 @@ type Order struct {
 	PaymentInfoID   *uint         `json:"payment_info_id,omitempty"`
 	PaymentInfo     *PaymentInfo  `gorm:"foreignKey:PaymentInfoID" json:"payment_info,omitempty"`
 
-	OrderItems []OrderItem `gorm:"polymorphic:Order;polymorphicValue:order" json:"order_items,omitempty"`
+	OrderItems []OrderItem `gorm:"polymorphic:Order;polymorphicValue:draft_order" json:"order_items,omitempty"`
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

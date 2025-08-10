@@ -85,3 +85,11 @@ func (r *productVariantRepository) CheckExistsAndQuantity(ctx context.Context, i
 	}
 	return nil
 }
+
+func (r *productVariantRepository) GetByIDs(ctx context.Context, ids []uint) ([]models.ProductVariant, error) {
+	var variants []models.ProductVariant
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&variants).Error; err != nil {
+		return nil, err
+	}
+	return variants, nil
+}

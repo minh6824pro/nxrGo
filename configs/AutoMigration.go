@@ -17,6 +17,7 @@ func AutoMigrate() {
 		&models.VariantOption{},
 		&models.VariantOptionValue{},
 		&models.Order{},
+		&models.DraftOrder{},
 		&models.OrderItem{},
 		&models.PaymentInfo{},
 	)

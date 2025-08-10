@@ -4,37 +4,40 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/minh6824pro/nxrGO/configs"
-	"github.com/minh6824pro/nxrGO/consumers"
 	"github.com/minh6824pro/nxrGO/database"
-	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
 	"github.com/minh6824pro/nxrGO/routes"
 	"log"
 	"time"
 )
 
 func main() {
+
+	// Set Time location
 	loc, err := time.LoadLocation("Asia/Ho_Chi_Minh")
 	if err != nil {
 		log.Fatalf("cannot load location: %v", err)
 	}
 	time.Local = loc
 
+	// Load env var
 	configs.LoadEnv()
-	database.ConnectDatabase()
 
-	// Auto
+	// Connect & auto create DB
+	database.ConnectDatabase()
 	//configs.AutoMigrate()
 
 	db := database.DB
 
-	configs.InitRabbitMQ()
-	defer configs.CloseRabbitMQ()
+	configs.InitRedis()
+	//configs.InitRabbitMQ()
+	//defer configs.CloseRabbitMQ()
+	//
+	//consumers.StartOrderConsumer()
 
-	consumers.StartOrderConsumer()
+	//orderRepo := repoImpl.NewOrderGormRepository(db)
+	//consumers.ConsumeOrderDLQ(orderRepo)
 
-	orderRepo := repoImpl.NewOrderGormRepository(db)
-	consumers.ConsumeOrderDLQ(orderRepo)
-
+	// Init PayOS SDK
 	configs.InitPayOS()
 
 	r := gin.Default()
@@ -65,6 +68,7 @@ func main() {
 	routes.RegisterProductRoutes(api, db)
 	routes.RegisterVariantRoutes(api, db)
 	routes.RegisterOrderRoutes(api, db)
-
+	routes.RegisterPayOSRoutes(api)
 	r.Run(":8080")
+
 }

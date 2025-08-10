@@ -14,7 +14,9 @@ func RegisterOrderRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 	productVariantRepo := repoImpl.NewProductVariantGormRepository(db)
 	orderItemRepo := repoImpl.NewOrderItemGormRepository(db)
 	orderRepo := repoImpl.NewOrderGormRepository(db)
-	orderService := serviceImpl.NewOrderService(db, productVariantRepo, orderItemRepo, orderRepo)
+	paymentInfoRepo := repoImpl.NewPaymentInfoGormImpl(db)
+	draftOrderRepo := repoImpl.NewDraftOrderGormRepository(db)
+	orderService := serviceImpl.NewOrderService(db, productVariantRepo, orderItemRepo, orderRepo, draftOrderRepo, paymentInfoRepo)
 	orderController := controllers.NewOrderController(orderService)
 
 	jwtService := jwt.NewJWTService()

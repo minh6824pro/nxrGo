@@ -14,6 +14,7 @@ const (
 	OrderCreateQueue = "order.create"
 	OrderRetryQueue  = "order.retry"
 	OrderDLQ         = "order.dlq"
+	OrderReplyQueue  = "order.reply" // Thêm reply queue
 )
 
 func InitRabbitMQ() {
@@ -49,8 +50,10 @@ func DeclareOrderQueues() {
 		"x-dead-letter-routing-key": OrderDLQ,
 	})
 
-	log.Printf("Success to open RabbitMQ channel")
+	// Reply queue để nhận kết quả từ consumer
+	_, _ = RMQChannel.QueueDeclare(OrderReplyQueue, true, false, false, false, nil)
 
+	log.Printf("Success to open RabbitMQ channel")
 }
 
 // Đóng kết nối khi ứng dụng shutdown

@@ -11,30 +11,30 @@ import (
 	"net/http"
 )
 
-type orderGormRepository struct {
+type draftOrderGormRepository struct {
 	db *gorm.DB
 }
 
-func NewOrderGormRepository(db *gorm.DB) repositories.OrderRepository {
-	return &orderGormRepository{db}
+func NewDraftOrderGormRepository(db *gorm.DB) repositories.DraftOrderRepository {
+	return &draftOrderGormRepository{db}
 }
 
-func (o orderGormRepository) CreateTx(ctx context.Context, tx *gorm.DB, order *models.Order) (*models.Order, error) {
+func (d draftOrderGormRepository) CreateTx(ctx context.Context, tx *gorm.DB, order *models.DraftOrder) (*models.DraftOrder, error) {
 	if err := tx.Create(order).Error; err != nil {
 		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected error while create order", http.StatusInternalServerError, err)
 	}
 	return order, nil
 }
 
-func (o orderGormRepository) Create(ctx context.Context, order *models.Order) error {
-	if err := o.db.Create(order).Error; err != nil {
+func (d draftOrderGormRepository) Create(ctx context.Context, order *models.DraftOrder) error {
+	if err := d.db.Create(order).Error; err != nil {
 		return customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected error while create order", http.StatusInternalServerError, err)
 	}
 	return nil
 }
 
-func (o orderGormRepository) Delete(ctx context.Context, id uint) error {
-	if err := o.db.WithContext(ctx).Delete(&models.Order{}, id).Error; err != nil {
+func (d draftOrderGormRepository) Delete(ctx context.Context, id uint) error {
+	if err := d.db.WithContext(ctx).Delete(&models.Order{}, id).Error; err != nil {
 		var mysqlErr *mysql.MySQLError
 		if errors.As(err, &mysqlErr) {
 			if mysqlErr.Number == 1451 {
@@ -47,10 +47,10 @@ func (o orderGormRepository) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
-func (o orderGormRepository) GetById(ctx context.Context, orderID uint, userID uint) (*models.Order, error) {
+func (d draftOrderGormRepository) GetById(ctx context.Context, orderID uint, userID uint) (*models.DraftOrder, error) {
 
-	var m models.Order
-	if err := o.db.WithContext(ctx).
+	var m models.DraftOrder
+	if err := d.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", orderID, userID).
 		Preload("OrderItems").
 		Preload("OrderItems.Variant").
@@ -64,9 +64,4 @@ func (o orderGormRepository) GetById(ctx context.Context, orderID uint, userID u
 	}
 
 	return &m, nil
-}
-
-func (o orderGormRepository) Save(ctx context.Context, order *models.Order) error {
-	//TODO implement me
-	panic("implement me")
 }

@@ -14,7 +14,7 @@ type CreateOrderInput struct {
 	Total           float64              `json:"total" binding:"required"`
 	PaymentMethod   models.PaymentMethod `json:"payment_method" binding:"required,oneof=COD BANK"`
 	ShippingAddress string               `json:"shipping_address" binding:"required"`
-	ShippingFee     string               `json:"shipping_fee" binding:"required"`
+	ShippingFee     float64              `json:"shipping_fee" binding:"required"`
 	PhoneNumber     string               `json:"phone_number" binding:"required,len=10"`
 	OrderItems      []CreateOrderItem    `json:"order_items" binding:"required,dive,required"`
 }
