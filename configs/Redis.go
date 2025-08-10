@@ -6,7 +6,6 @@ import (
 	"log"
 	"os"
 	"strconv"
-	"time"
 )
 
 var (
@@ -41,17 +40,17 @@ func InitRedis() {
 	log.Println("Connected to Redis successfully")
 }
 
-// Ví dụ hàm tiện ích Set với TTL
-func Set(key string, value interface{}, ttl time.Duration) error {
-	return RedisClient.Set(RedisCtx, key, value, ttl).Err()
-}
-
-// Ví dụ hàm tiện ích Get
-func Get(key string) (string, error) {
-	return RedisClient.Get(RedisCtx, key).Result()
-}
-
-// Xóa key
-func Delete(key string) error {
-	return RedisClient.Del(RedisCtx, key).Err()
-}
+//// Ví dụ hàm tiện ích Set với TTL
+//func Set(key string, value interface{}, ttl time.Duration) error {
+//	return RedisClient.Set(RedisCtx, key, value, ttl).Err()
+//}
+//
+//// Ví dụ hàm tiện ích Get
+//func Get(key string) (string, error) {
+//	return RedisClient.Get(RedisCtx, key).Result()
+//}
+//
+//// Xóa key
+//func Delete(key string) error {
+//	return RedisClient.Del(RedisCtx, key).Err()
+//}

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/minh6824pro/nxrGO/configs"
 	"github.com/minh6824pro/nxrGO/database"
@@ -24,7 +25,7 @@ func main() {
 
 	// Connect & auto create DB
 	database.ConnectDatabase()
-	//configs.AutoMigrate()
+	configs.AutoMigrate()
 
 	db := database.DB
 
@@ -36,9 +37,6 @@ func main() {
 
 	//orderRepo := repoImpl.NewOrderGormRepository(db)
 	//consumers.ConsumeOrderDLQ(orderRepo)
-
-	// Init PayOS SDK
-	configs.InitPayOS()
 
 	r := gin.Default()
 
@@ -68,7 +66,26 @@ func main() {
 	routes.RegisterProductRoutes(api, db)
 	routes.RegisterVariantRoutes(api, db)
 	routes.RegisterOrderRoutes(api, db)
-	routes.RegisterPayOSRoutes(api)
-	r.Run(":8080")
+	routes.RegisterPayOSRoutes(api, db)
 
+	ready := make(chan bool)
+
+	// Chạy server trong goroutine
+	go func() {
+		// Báo hiệu server sẵn sàng sau 2 giây (có thể check thực tế hơn)
+		go func() {
+			time.Sleep(2 * time.Second)
+			ready <- true
+		}()
+
+		if err := r.Run(":8080"); err != nil {
+			fmt.Println("Server error:", err)
+		}
+	}()
+
+	// Chờ tín hiệu từ channel
+	<-ready
+	fmt.Println("Server ready, init PayOS...")
+	configs.InitPayOS()
+	select {}
 }

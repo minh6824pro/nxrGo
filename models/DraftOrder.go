@@ -14,8 +14,8 @@ type DraftOrder struct {
 	PhoneNumber     string        `gorm:"type:varchar(10)" json:"phone_number"`
 	PaymentInfoID   *uint         `json:"payment_info_id,omitempty"`
 	PaymentInfo     *PaymentInfo  `gorm:"foreignKey:PaymentInfoID" json:"payment_info,omitempty"`
-
-	OrderItems []OrderItem `gorm:"polymorphic:Order;polymorphicValue:draft_order" json:"order_items,omitempty"`
+	ToOrderID       *uint         `gorm:"column:to_order" json:"to_order"`
+	OrderItems      []OrderItem   `gorm:"polymorphic:Order;polymorphicValue:draft_order" json:"order_items,omitempty"`
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

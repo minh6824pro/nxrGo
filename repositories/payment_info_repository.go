@@ -7,4 +7,5 @@ import (
 
 type PaymentInfoRepository interface {
 	Create(ctx context.Context, payment *models.PaymentInfo) error
+	Save(ctx context.Context, payment *models.PaymentInfo) error
 }

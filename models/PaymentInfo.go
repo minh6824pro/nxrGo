@@ -18,4 +18,7 @@ type PaymentInfo struct {
 	PaymentLink        string        `gorm:"type:varchar(255)" json:"payment_link"`
 	CancellationReason string        `gorm:"type:varchar(255)" json:"cancellation_reason"`
 	CancellationAt     *time.Time    `json:"cancellation_at,omitempty"`
+
+	CreatedAt time.Time `json:"-"`
+	UpdatedAt time.Time `json:"-"`
 }

@@ -17,7 +17,7 @@ func NewOrderItemGormRepository(db *gorm.DB) repositories.OrderItemRepository {
 	return &orderItemGormRepository{db}
 }
 
-func (o orderItemGormRepository) CreateTx(ctx context.Context, tx *gorm.DB, orderItem *models.OrderItem) (*models.OrderItem, error) {
+func (o *orderItemGormRepository) CreateTx(ctx context.Context, tx *gorm.DB, orderItem *models.OrderItem) (*models.OrderItem, error) {
 	if err := tx.WithContext(ctx).Create(orderItem).Error; err != nil {
 		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected Error", http.StatusInternalServerError, err)
 	}
@@ -25,10 +25,14 @@ func (o orderItemGormRepository) CreateTx(ctx context.Context, tx *gorm.DB, orde
 	return orderItem, nil
 }
 
-func (o orderItemGormRepository) Create(ctx context.Context, orderItem *models.OrderItem) error {
+func (o *orderItemGormRepository) Create(ctx context.Context, orderItem *models.OrderItem) error {
 	if err := o.db.Create(orderItem).Error; err != nil {
 		return customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected Error", http.StatusInternalServerError, err)
 	}
 
 	return nil
+}
+func (o *orderItemGormRepository) Save(ctx context.Context, orderItem *models.OrderItem) error {
+	return o.db.WithContext(ctx).Save(orderItem).Error
+
 }

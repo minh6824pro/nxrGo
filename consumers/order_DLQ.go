@@ -34,7 +34,7 @@ func ConsumeOrderDLQ(orderRepo repositories.OrderRepository) {
 				log.Println("❌ Failed to unmarshal DLQ message:", err)
 				continue
 			}
-			log.Printf("🪦 DLQ Received - OrderID: %d", failedMsg.OrderID)
+			log.Printf("🪦 DLQ Received - DraftOrderID: %d", failedMsg.OrderID)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			err := orderRepo.Delete(ctx, failedMsg.OrderID)
@@ -44,7 +44,7 @@ func ConsumeOrderDLQ(orderRepo repositories.OrderRepository) {
 				return
 			}
 
-			log.Printf("🪦 DLQ Order Deleted - OrderID: %d", failedMsg.OrderID)
+			log.Printf("🪦 DLQ Order Deleted - DraftOrderID: %d", failedMsg.OrderID)
 
 		}
 	}()

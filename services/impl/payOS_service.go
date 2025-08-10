@@ -16,7 +16,7 @@ func CreatePayOSPayment(orderCode int, amount float64, items []payos.Item, descr
 	expiredAt := int(time.Now().Add(5 * time.Minute).Unix())
 
 	body := payos.CheckoutRequestType{
-		OrderCode:   int64(orderCode) + 123456,
+		OrderCode:   int64(orderCode),
 		Amount:      int(amount),
 		Items:       items,
 		Description: description,

@@ -2,7 +2,10 @@ package routes
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/minh6824pro/nxrGO/cache"
+	"github.com/minh6824pro/nxrGO/configs"
 	"github.com/minh6824pro/nxrGO/controllers"
+	"github.com/minh6824pro/nxrGO/event"
 	"github.com/minh6824pro/nxrGO/jwt"
 	"github.com/minh6824pro/nxrGO/middleware"
 	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
@@ -16,7 +19,9 @@ func RegisterOrderRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 	orderRepo := repoImpl.NewOrderGormRepository(db)
 	paymentInfoRepo := repoImpl.NewPaymentInfoGormImpl(db)
 	draftOrderRepo := repoImpl.NewDraftOrderGormRepository(db)
-	orderService := serviceImpl.NewOrderService(db, productVariantRepo, orderItemRepo, orderRepo, draftOrderRepo, paymentInfoRepo)
+	productVariantCache := cache.NewProductVariantRedisService(configs.RedisClient, configs.RedisCtx)
+	eventPub := event.NewChannelEventPublisher()
+	orderService := serviceImpl.NewOrderService(db, productVariantRepo, orderItemRepo, orderRepo, draftOrderRepo, paymentInfoRepo, productVariantCache, eventPub)
 	orderController := controllers.NewOrderController(orderService)
 
 	jwtService := jwt.NewJWTService()

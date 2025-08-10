@@ -33,6 +33,18 @@ func (d draftOrderGormRepository) Create(ctx context.Context, order *models.Draf
 	return nil
 }
 
+func (d draftOrderGormRepository) Save(ctx context.Context, order *models.DraftOrder) error {
+	if err := d.db.Save(order).Error; err != nil {
+		return customErr.NewError(
+			customErr.INTERNAL_ERROR,
+			"Unexpected error while save order",
+			http.StatusInternalServerError,
+			err,
+		)
+	}
+	return nil
+}
+
 func (d draftOrderGormRepository) Delete(ctx context.Context, id uint) error {
 	if err := d.db.WithContext(ctx).Delete(&models.Order{}, id).Error; err != nil {
 		var mysqlErr *mysql.MySQLError
@@ -47,13 +59,12 @@ func (d draftOrderGormRepository) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
-func (d draftOrderGormRepository) GetById(ctx context.Context, orderID uint, userID uint) (*models.DraftOrder, error) {
+func (d draftOrderGormRepository) GetById(ctx context.Context, orderID uint) (*models.DraftOrder, error) {
 
 	var m models.DraftOrder
 	if err := d.db.WithContext(ctx).
-		Where("id = ? AND user_id = ?", orderID, userID).
+		Where("id = ? ", orderID).
 		Preload("OrderItems").
-		Preload("OrderItems.Variant").
 		Preload("PaymentInfo").
 		First(&m).Error; err != nil {
 

@@ -86,10 +86,40 @@ func (r *productVariantRepository) CheckExistsAndQuantity(ctx context.Context, i
 	return nil
 }
 
-func (r *productVariantRepository) GetByIDs(ctx context.Context, ids []uint) ([]models.ProductVariant, error) {
+func (r *productVariantRepository) GetByIDSForRedisCache(ctx context.Context, ids []uint) ([]models.ProductVariant, error) {
 	var variants []models.ProductVariant
 	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&variants).Error; err != nil {
 		return nil, err
 	}
+
+	// Struct for quantity reserved in draft_orders
+	type ReservedQty struct {
+		ProductVariantID uint
+		TotalQuantity    uint
+	}
+
+	var reserved []ReservedQty
+	if err := r.db.WithContext(ctx).
+		Table("order_items oi").
+		Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
+		Joins("INNER JOIN draft_orders do ON do.id = oi.order_id").
+		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order is null or do.to_order !=0 ", ids, "draft_order").
+		Group("oi.product_variant_id").
+		Scan(&reserved).Error; err != nil {
+		return nil, err
+	}
+
+	reservedMap := make(map[uint]uint)
+	for _, r := range reserved {
+		reservedMap[r.ProductVariantID] = r.TotalQuantity
+	}
+
+	// Update real quantity
+	for i, v := range variants {
+		if qty, ok := reservedMap[v.ID]; ok {
+			variants[i].Quantity = v.Quantity - qty
+		}
+	}
+
 	return variants, nil
 }

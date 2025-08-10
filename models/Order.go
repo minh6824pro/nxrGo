@@ -33,7 +33,7 @@ type Order struct {
 	ShippingAddress string        `gorm:"type:varchar(255)" json:"shipping_address"`
 	ShippingFee     float64       `gorm:"type:decimal(10,2)" json:"shipping_fee"`
 	PhoneNumber     string        `gorm:"type:varchar(10)" json:"phone_number"`
-	PaymentInfoID   *uint         `json:"payment_info_id,omitempty"`
+	PaymentInfoID   *uint         `json:"-"`
 	PaymentInfo     *PaymentInfo  `gorm:"foreignKey:PaymentInfoID" json:"payment_info,omitempty"`
 
 	OrderItems []OrderItem `gorm:"polymorphic:Order;polymorphicValue:order" json:"order_items,omitempty"`
