@@ -123,3 +123,23 @@ func (r *productVariantRepository) GetByIDSForRedisCache(ctx context.Context, id
 
 	return variants, nil
 }
+
+func (r *productVariantRepository) UpdateQuantity(ctx context.Context, quantityMap map[uint]uint) error {
+	// Begin Transaction
+	tx := r.db.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+
+	for variantID, qty := range quantityMap {
+		// Update quantity for each product variant
+		if err := tx.Model(&models.ProductVariant{}).
+			Where("id = ?", variantID).
+			UpdateColumn("quantity", gorm.Expr("quantity - ?", qty)).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	return tx.Commit().Error
+}

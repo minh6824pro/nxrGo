@@ -46,7 +46,7 @@ func (d draftOrderGormRepository) Save(ctx context.Context, order *models.DraftO
 }
 
 func (d draftOrderGormRepository) Delete(ctx context.Context, id uint) error {
-	if err := d.db.WithContext(ctx).Delete(&models.Order{}, id).Error; err != nil {
+	if err := d.db.WithContext(ctx).Delete(&models.DraftOrder{}, id).Error; err != nil {
 		var mysqlErr *mysql.MySQLError
 		if errors.As(err, &mysqlErr) {
 			if mysqlErr.Number == 1451 {
@@ -75,4 +75,22 @@ func (d draftOrderGormRepository) GetById(ctx context.Context, orderID uint) (*m
 	}
 
 	return &m, nil
+}
+
+func (d draftOrderGormRepository) GetsForDbUpdate(ctx context.Context) ([]models.DraftOrder, error) {
+	var draftOrders []models.DraftOrder
+	err := d.db.WithContext(ctx).
+		Where("to_order != ?", 0).
+		Find(&draftOrders).Error
+	if err != nil {
+		return nil, err
+	}
+	return draftOrders, nil
+}
+
+func (d draftOrderGormRepository) CleanDraft(ctx context.Context) error {
+	err := d.db.WithContext(ctx).
+		Where("to_order = ?", 0).
+		Delete(&models.DraftOrder{}).Error
+	return err
 }

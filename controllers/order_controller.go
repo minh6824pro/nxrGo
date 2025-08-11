@@ -70,3 +70,11 @@ func (o *OrderController) GetById(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": order})
 }
+
+func (o *OrderController) UpdateDb(c *gin.Context) {
+	err := o.service.UpdateQuantity(c)
+	if err != nil {
+		return
+	}
+	return
+}

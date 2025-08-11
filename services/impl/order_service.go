@@ -2,10 +2,8 @@ package impl
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/minh6824pro/nxrGO/cache"
-	"github.com/minh6824pro/nxrGO/configs"
 	"github.com/minh6824pro/nxrGO/dto"
 	customErr "github.com/minh6824pro/nxrGO/errors"
 	"github.com/minh6824pro/nxrGO/event"
@@ -394,6 +392,7 @@ func (o *orderService) DraftOrderToOrder(ctx context.Context, draftOrder *models
 
 func (o *orderService) DraftOrderToOrderResponse(ctx context.Context, draftOrder *models.DraftOrder, orderItems []models.OrderItem) (models.Order, error) {
 	order := models.Order{
+		ID:              draftOrder.ID,
 		UserID:          draftOrder.UserID,
 		Status:          draftOrder.Status,
 		Total:           draftOrder.Total,
@@ -430,28 +429,8 @@ func (o *orderService) PayOSPaymentSuccess(ctx context.Context, draftOrderID uin
 	}
 }
 
-func (o *orderService) startReplyConsumer() {
-	msgs, err := configs.RMQChannel.Consume(configs.OrderReplyQueue, "", true, false, false, false, nil)
-	if err != nil {
-		log.Fatalf("Failed to consume from order.reply: %v", err)
-	}
-
-	for d := range msgs {
-		var result dto.OrderProcessingResult
-		if err := json.Unmarshal(d.Body, &result); err != nil {
-			log.Printf("Invalid reply message format: %v", err)
-			continue
-		}
-
-		correlationID := d.CorrelationId
-		if replyChan, exists := o.pendingReplies[correlationID]; exists {
-			replyChan <- result
-		}
-	}
-}
-
 func (o *orderService) GetById(ctx context.Context, orderID uint, userID uint) (*models.Order, error) {
-	return o.orderRepo.GetById(ctx, orderID, userID)
+	return o.orderRepo.GetByIdAndUserId(ctx, orderID, userID)
 }
 
 func MapOrderItemsToPayOSItems(orderItem []models.OrderItem, shippingFee int) []payos.Item {
@@ -531,4 +510,75 @@ func (o *orderService) PayOSPaymentCancelled(ctx context.Context, draftId uint, 
 	} else {
 		log.Printf(err.Error(), "while transitioning payment info from PayOSPayment")
 	}
+}
+
+func (o *orderService) UpdateQuantity(ctx context.Context) error {
+	draftOrders, err := o.draftOrderRepo.GetsForDbUpdate(ctx)
+	if err != nil {
+		return err
+	}
+	totalQuantityByVariant := make(map[uint]uint)
+
+	for _, d := range draftOrders {
+		log.Printf("Draft Order ID: %d, Order ID: %d", d.ID, d.ToOrderID)
+		order, err := o.orderRepo.GetById(ctx, *d.ToOrderID)
+		if err != nil {
+			return err
+		}
+		orderItem := order.OrderItems
+		for _, oi := range orderItem {
+			totalQuantityByVariant[oi.ProductVariantID] += oi.Quantity
+		}
+	}
+	log.Printf("Total quantity of variants: %d", totalQuantityByVariant)
+
+	err = o.productVariantRepo.UpdateQuantity(ctx, totalQuantityByVariant)
+	if err != nil {
+		return err
+	}
+
+	for _, d := range draftOrders {
+		err := o.draftOrderRepo.Delete(ctx, d.ID)
+		if err != nil {
+			return err
+		}
+		log.Printf("Deleted draft order %d", d.ID)
+	}
+
+	log.Printf("Update Db successfully")
+
+	var keys []uint
+	for k := range totalQuantityByVariant {
+		keys = append(keys, k)
+	}
+
+	// Reset redis cache
+	variants, err := o.productVariantRepo.GetByIDSForRedisCache(ctx, keys)
+	if err != nil {
+		return err
+	}
+
+	for _, pv := range variants {
+		// save as hash: id, quantity, price
+		if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
+			log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
+		}
+	}
+	log.Printf("Reset Redis Cache successfully")
+
+	//Clean draft
+	err = o.CleanDraft(ctx)
+	if err != nil {
+		return err
+	}
+	log.Printf("Clean draft orders")
+	return nil
+}
+
+func (o *orderService) CleanDraft(ctx context.Context) error {
+	err := o.draftOrderRepo.CleanDraft(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
 }

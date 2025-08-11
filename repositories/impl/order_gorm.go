@@ -47,7 +47,7 @@ func (o orderGormRepository) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
-func (o orderGormRepository) GetById(ctx context.Context, orderID uint, userID uint) (*models.Order, error) {
+func (o orderGormRepository) GetByIdAndUserId(ctx context.Context, orderID uint, userID uint) (*models.Order, error) {
 
 	var m models.Order
 	if err := o.db.WithContext(ctx).
@@ -55,6 +55,23 @@ func (o orderGormRepository) GetById(ctx context.Context, orderID uint, userID u
 		Preload("OrderItems").
 		Preload("OrderItems.Variant").
 		Preload("PaymentInfo").
+		First(&m).Error; err != nil {
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customErr.NewError(customErr.FORBIDDEN, "Order not found", http.StatusNotFound, nil)
+		}
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+	}
+
+	return &m, nil
+}
+
+func (o orderGormRepository) GetById(ctx context.Context, orderID uint) (*models.Order, error) {
+
+	var m models.Order
+	if err := o.db.WithContext(ctx).
+		Where("id = ?", orderID).
+		Preload("OrderItems").
 		First(&m).Error; err != nil {
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {

@@ -14,6 +14,7 @@ type ProductVariantRepository interface {
 	GetByIDSForRedisCache(ctx context.Context, ids []uint) ([]models.ProductVariant, error)
 	CheckExistsAndQuantity(ctx context.Context, id uint, quantity uint) error
 	Update(ctx context.Context, variant *models.ProductVariant) error
+	UpdateQuantity(ctx context.Context, quantityMap map[uint]uint) error
 	Delete(ctx context.Context, id uint) error
 	List(ctx context.Context) ([]models.ProductVariant, error)
 }

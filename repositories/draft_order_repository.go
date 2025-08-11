@@ -12,4 +12,6 @@ type DraftOrderRepository interface {
 	Delete(ctx context.Context, id uint) error
 	GetById(ctx context.Context, orderID uint) (*models.DraftOrder, error)
 	Save(ctx context.Context, order *models.DraftOrder) error
+	GetsForDbUpdate(ctx context.Context) ([]models.DraftOrder, error)
+	CleanDraft(ctx context.Context) error
 }

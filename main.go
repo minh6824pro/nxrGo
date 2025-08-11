@@ -25,7 +25,7 @@ func main() {
 
 	// Connect & auto create DB
 	database.ConnectDatabase()
-	configs.AutoMigrate()
+	//configs.AutoMigrate()
 
 	db := database.DB
 
@@ -70,9 +70,7 @@ func main() {
 
 	ready := make(chan bool)
 
-	// Chạy server trong goroutine
 	go func() {
-		// Báo hiệu server sẵn sàng sau 2 giây (có thể check thực tế hơn)
 		go func() {
 			time.Sleep(2 * time.Second)
 			ready <- true
@@ -83,7 +81,6 @@ func main() {
 		}
 	}()
 
-	// Chờ tín hiệu từ channel
 	<-ready
 	fmt.Println("Server ready, init PayOS...")
 	configs.InitPayOS()
