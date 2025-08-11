@@ -23,6 +23,15 @@ func NewCategoryController(s services.CategoryService) *CategoryController {
 	return &CategoryController{s}
 }
 
+// Create godoc
+// @Summary      Create a new category
+// @Description  Create a new category with the input payload
+// @Tags         categories
+// @Accept       json
+// @Produce      json
+// @Param        category  body      dto.CreateCategoryInput  true  "Create category"
+// @Success      201       {object}  models.Category
+// @Router       /categories [post]
 func (c *CategoryController) Create(ctx *gin.Context) {
 	var cat dto.CreateCategoryInput
 	if err := ctx.ShouldBindJSON(&cat); err != nil {
@@ -49,6 +58,15 @@ func (c *CategoryController) Create(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, createCate)
 }
 
+// GetByID godoc
+// @Summary      Get category by id
+// @Description  Get category by id
+// @Tags         categories
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Category ID"
+// @Success      200 {object} dto.CategoryResponse
+// @Router       /categories/{id} [get]
 func (c *CategoryController) GetByID(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 	cat, err := c.service.GetByID(ctx.Request.Context(), uint(id))
@@ -80,6 +98,14 @@ func (c *CategoryController) Update(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, cat)
 }
 
+// Delete godoc
+// @Summary      Delete category by id
+// @Description  Delete category by id
+// @Tags         categories
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Category ID"
+// @Router       /categories/{id} [delete]
 func (c *CategoryController) Delete(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 	if err := c.service.Delete(ctx.Request.Context(), uint(id)); err != nil {
@@ -89,6 +115,14 @@ func (c *CategoryController) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
+// List godoc
+// @Summary      Get list of categories
+// @Description  Get list of categories
+// @Tags         categories
+// @Accept       json
+// @Produce      json
+// @Success      200 {array} dto.CategoryResponse "Success response with category data"
+// @Router       /categories [get]
 func (c *CategoryController) List(ctx *gin.Context) {
 	list, err := c.service.List(ctx.Request.Context())
 	if err != nil {
@@ -98,6 +132,16 @@ func (c *CategoryController) List(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, list)
 }
 
+// Patch godoc
+// @Summary      Patch category by id
+// @Description  Patch category by id
+// @Tags         categories
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Category ID"
+// @Param        category body dto.UpdateCategoryInput true "Patch category request"
+// @Success      200 {object} dto.CategoryResponse "Success response with category data"
+// @Router       /categories/{id} [patch]
 func (c *CategoryController) Patch(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 

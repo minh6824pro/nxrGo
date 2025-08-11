@@ -3,7 +3,7 @@ package controllers
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/minh6824pro/nxrGO/services"
-	"github.com/payOSHQ/payos-lib-golang"
+	payos "github.com/payOSHQ/payos-lib-golang"
 	"log"
 	"net/http"
 )
@@ -18,6 +18,15 @@ func NewWebhookController(orderService services.OrderService) *WebhookController
 	}
 }
 
+// HandleWebhook godoc
+// @Summary      Handle incoming webhook from PayOS
+// @Description  Receive and verify webhook payload with checksum key, then process payment success.
+// @Tags         webhooks
+// @Accept       json
+// @Produce      plain
+// @Param        webhookBody  body  dto.WebhookType  true  "Webhook payload"
+// @Success      200  {string}  string  "Webhook processed successfully"
+// @Router       /webhook [post]
 func (pc *WebhookController) HandleWebhook(c *gin.Context) {
 	var webhookBody payos.WebhookType
 	if err := c.ShouldBindJSON(&webhookBody); err != nil {

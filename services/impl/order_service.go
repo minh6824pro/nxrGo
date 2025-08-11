@@ -2,6 +2,7 @@ package impl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/minh6824pro/nxrGO/cache"
 	"github.com/minh6824pro/nxrGO/dto"
@@ -12,6 +13,7 @@ import (
 	"github.com/minh6824pro/nxrGO/services"
 	"github.com/minh6824pro/nxrGO/utils"
 	"github.com/payOSHQ/payos-lib-golang"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"log"
 	"net/http"
@@ -28,7 +30,6 @@ type orderService struct {
 	paymentInfoRepo     repositories.PaymentInfoRepository
 	productVariantCache cache.ProductVariantRedis
 	eventBus            event.EventPublisher
-	pendingReplies      map[string]chan dto.OrderProcessingResult // correlationID -> reply channel
 }
 
 func NewOrderService(db *gorm.DB, productVariantRepo repositories.ProductVariantRepository, orderItemRepo repositories.OrderItemRepository,
@@ -45,14 +46,13 @@ func NewOrderService(db *gorm.DB, productVariantRepo repositories.ProductVariant
 		paymentInfoRepo:     paymentInfoRepo,
 		productVariantCache: productVariantCache,
 		eventBus:            eventBus,
-		pendingReplies:      make(map[string]chan dto.OrderProcessingResult),
 	}
 	service.registerEventHandlers()
 
 	return service
 }
 
-func (o *orderService) Create(ctx context.Context, input dto.CreateOrderInput) (*models.Order, error) {
+func (o *orderService) Create(ctx context.Context, input dto.CreateOrderInput) (*dto.CreateOrderResponse, error) {
 	var total float64 = 0
 
 	luaScript := `
@@ -197,9 +197,9 @@ return {"OK"}
 				}
 			}
 
-			// Save all queried variants to Redis as Hash
+			// Saved all queried variants to Redis as Hash
 			for _, pv := range variants {
-				// save as hash: id, quantity, price
+				// save as hash: id, quantity, price, image,productName, productId
 				if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
 					log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
 				}
@@ -295,20 +295,18 @@ return {"OK"}
 	if err := o.CreatePayment(ctx, &draftOrder, orderItems); err != nil {
 		return nil, err
 	}
-
+	// Convert into Real order if payment method = COD
 	if draftOrder.PaymentMethod == models.PaymentMethodCOD {
 		order, err := o.DraftOrderToOrder(ctx, &draftOrder, orderItems)
 		if err != nil {
 			return nil, err
 		}
-		return &order, nil
+		return o.MapOrderToCreateOrderResponse(ctx, &order)
 
 	} else {
-		order, err := o.DraftOrderToOrderResponse(ctx, &draftOrder, orderItems)
-		if err != nil {
-			return nil, err
-		}
-		return &order, nil
+		// Parse response
+		draftOrder.OrderItems = orderItems
+		return o.MapDraftOrderToCreateOrderResponse(ctx, &draftOrder)
 	}
 }
 func (o *orderService) CreatePayment(ctx context.Context, draftOrder *models.DraftOrder, orderItems []models.OrderItem) error {
@@ -335,6 +333,7 @@ func (o *orderService) CreatePayment(ctx context.Context, draftOrder *models.Dra
 		if err := o.eventBus.PublishPaymentCreated(paymentEvent); err != nil {
 			log.Printf("Failed to publish payment created event: %v", err)
 		}
+		log.Printf("PayOs payment created for order %d: %s", draftOrder.ID, paymentData.CheckoutUrl)
 
 	}
 	var paymentInfo = &models.PaymentInfo{
@@ -420,7 +419,7 @@ func (o *orderService) PayOSPaymentSuccess(ctx context.Context, draftOrderID uin
 			log.Printf(err.Error(), "while saving payment info")
 		}
 	} else {
-		log.Printf(err.Error(), "while transitioning payment info from PayOSPayment")
+		log.Printf("error while transitioning payment info from PayOSPayment payment id: %d", draftOrder.PaymentInfoID)
 	}
 	_, err = o.DraftOrderToOrder(ctx, draftOrder, draftOrder.OrderItems)
 	if err != nil {
@@ -455,7 +454,7 @@ func MapOrderItemsToPayOSItems(orderItem []models.OrderItem, shippingFee int) []
 
 func (o *orderService) registerEventHandlers() {
 	o.eventBus.Subscribe(func(e event.PayOSPaymentCreatedEvent) {
-		log.Printf("Payment created for order %d: %s", e.DraftOrderID, e.PaymentLink)
+		log.Printf("Tracking payment created for order %d: %s", e.DraftOrderID, e.PaymentLink)
 		var data *payos.PaymentLinkDataType
 		for {
 			var err error
@@ -503,12 +502,15 @@ func (o *orderService) PayOSPaymentCancelled(ctx context.Context, draftId uint, 
 
 	if nextStatus, ok := utils.CanTransitionPayment(draftOrder.PaymentInfo.Status, utils.EventPayCancel); ok {
 		draftOrder.PaymentInfo.Status = nextStatus
+		draftOrder.PaymentInfo.CancellationReason = "Webhook"
+		now := time.Now()
+		draftOrder.PaymentInfo.CancellationAt = &now
 		err = o.paymentInfoRepo.Save(ctx, draftOrder.PaymentInfo)
 		if err != nil {
 			log.Printf(err.Error(), "while saving payment info")
 		}
 	} else {
-		log.Printf(err.Error(), "while transitioning payment info from PayOSPayment")
+		log.Printf("error while transitioning payment info from PayOSPayment payment id: %d", draftOrder.PaymentInfoID)
 	}
 }
 
@@ -545,7 +547,7 @@ func (o *orderService) UpdateQuantity(ctx context.Context) error {
 		log.Printf("Deleted draft order %d", d.ID)
 	}
 
-	log.Printf("Update Db successfully")
+	log.Printf("UpdateOrderStatus Db successfully")
 
 	var keys []uint
 	for k := range totalQuantityByVariant {
@@ -559,7 +561,7 @@ func (o *orderService) UpdateQuantity(ctx context.Context) error {
 	}
 
 	for _, pv := range variants {
-		// save as hash: id, quantity, price
+		// save as hash: id, quantity, price, image,productName, productId
 		if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
 			log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
 		}
@@ -581,4 +583,231 @@ func (o *orderService) CleanDraft(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (o *orderService) GetsByStatus(ctx context.Context, status models.OrderStatus, userId uint) ([]*models.Order, error) {
+
+	return o.orderRepo.GetsByStatusAndUserId(ctx, status, userId)
+}
+
+func (o *orderService) UpdateOrderStatus(ctx context.Context, orderId uint, event utils.OrderEvent) (*models.Order, error) {
+	order, err := o.orderRepo.GetById(ctx, orderId)
+	if err != nil {
+		return nil, err
+	}
+	if nextStatus, err := utils.CanTransitionOrder(order.Status, event); err != nil {
+		log.Printf(err.Error(), "///123456")
+		return nil, err
+	} else {
+		log.Printf("error while transitioning order status, order id: %d", order.ID)
+		order.Status = nextStatus
+		err = o.orderRepo.Update(ctx, order)
+		if err != nil {
+			log.Printf(err.Error(), "while saving order")
+			return nil, err
+		}
+		return order, nil
+	}
+}
+
+func (o *orderService) ReBuy(ctx context.Context, orderId uint, userId uint) (*dto.CreateOrderResponse, error) {
+
+	order, err := o.orderRepo.GetByIdAndUserId(ctx, orderId, userId)
+	if err != nil {
+		return nil, err
+	}
+	log.Print(order.OrderItems, " ////////123")
+
+	create, err := o.Create(ctx, OrderToCreateOrderInput(order))
+	if err != nil {
+		return nil, err
+	}
+
+	return create, nil
+}
+
+func OrderToCreateOrderInput(order *models.Order) dto.CreateOrderInput {
+	var items []dto.CreateOrderItem
+
+	for _, detail := range order.OrderItems {
+		item := dto.CreateOrderItem{
+			ProductVariantID: detail.ProductVariantID,
+			Quantity:         detail.Quantity,
+			Price:            detail.Price,
+			OrderID:          order.ID,
+		}
+		items = append(items, item)
+	}
+
+	return dto.CreateOrderInput{
+		UserID:          order.UserID,
+		Total:           order.Total,
+		PaymentMethod:   order.PaymentMethod,
+		ShippingAddress: order.ShippingAddress,
+		ShippingFee:     order.ShippingFee,
+		PhoneNumber:     order.PhoneNumber,
+		OrderItems:      items,
+	}
+}
+
+func (o *orderService) MapOrderToCreateOrderResponse(ctx context.Context, order *models.Order) (*dto.CreateOrderResponse, error) {
+	var orderItems []dto.OrderItemResponse
+	var missingIDs []uint
+	for _, item := range order.OrderItems {
+		_, err := o.productVariantCache.GetProductVariantHash(item.ProductVariantID)
+		if err == redis.Nil {
+			missingIDs = append(missingIDs, item.ProductVariantID)
+		}
+	}
+	variants, err := o.productVariantRepo.GetByIDSForRedisCache(ctx, missingIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pv := range variants {
+		// save as hash: id, quantity, price, image,productName, productId
+		if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
+			log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
+		}
+	}
+	for _, item := range order.OrderItems {
+		hash, err := o.productVariantCache.GetProductVariantHash(item.ProductVariantID)
+		if err != nil && !errors.Is(err, redis.Nil) {
+			log.Printf("warning: Get productVariant %d from redis failed: %v", item.ProductVariantID, err)
+			return nil, err
+		}
+		orderItems = append(orderItems, dto.OrderItemResponse{
+			ID:                  item.ID,
+			OrderID:             item.OrderID,
+			OrderType:           item.OrderType,
+			ProductVariantID:    item.ProductVariantID,
+			Quantity:            item.Quantity,
+			Price:               item.Price,
+			TotalPrice:          item.TotalPrice,
+			ProductName:         hash["productName"],
+			ProductVariantImage: hash["image"],
+		})
+	}
+
+	var paymentInfo dto.PaymentInfoResponse
+	if order.PaymentInfo != nil {
+		paymentInfo = dto.PaymentInfoResponse{
+			ID:                 order.PaymentInfo.ID,
+			Amount:             order.PaymentInfo.Amount,
+			Status:             order.PaymentInfo.Status,
+			PaymentLink:        order.PaymentInfo.PaymentLink,
+			CancellationReason: order.PaymentInfo.CancellationReason,
+		}
+	}
+
+	data := dto.OrderData{
+		ID:              order.ID,
+		UserID:          order.UserID,
+		Status:          string(order.Status),
+		Total:           order.Total,
+		PaymentMethod:   string(order.PaymentMethod),
+		ShippingAddress: order.ShippingAddress,
+		ShippingFee:     order.ShippingFee,
+		PhoneNumber:     order.PhoneNumber,
+		PaymentInfo:     paymentInfo,
+		OrderItems:      orderItems,
+		CreatedAt:       order.CreatedAt,
+		UpdatedAt:       order.UpdatedAt,
+	}
+
+	return &dto.CreateOrderResponse{
+		Data:    data,
+		Message: "success",
+	}, nil
+}
+
+func (o *orderService) MapDraftOrderToCreateOrderResponse(ctx context.Context, order *models.DraftOrder) (*dto.CreateOrderResponse, error) {
+	var orderItems []dto.OrderItemResponse
+	var missingIDs []uint
+	for _, item := range order.OrderItems {
+		_, err := o.productVariantCache.GetProductVariantHash(item.ProductVariantID)
+		if err == redis.Nil {
+			missingIDs = append(missingIDs, item.ProductVariantID)
+		}
+	}
+	variants, err := o.productVariantRepo.GetByIDSForRedisCache(ctx, missingIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pv := range variants {
+		// save as hash: id, quantity, price, image,productName, productId
+		if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
+			log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
+		}
+	}
+	for _, item := range order.OrderItems {
+		hash, err := o.productVariantCache.GetProductVariantHash(item.ProductVariantID)
+		if err != nil && !errors.Is(err, redis.Nil) {
+			log.Printf("warning: Get productVariant %d from redis failed: %v", item.ProductVariantID, err)
+			return nil, err
+		}
+		orderItems = append(orderItems, dto.OrderItemResponse{
+			ID:                  item.ID,
+			OrderID:             item.OrderID,
+			OrderType:           item.OrderType,
+			ProductVariantID:    item.ProductVariantID,
+			Quantity:            item.Quantity,
+			Price:               item.Price,
+			TotalPrice:          item.TotalPrice,
+			ProductName:         hash["productName"],
+			ProductVariantImage: hash["image"],
+		})
+	}
+
+	var paymentInfo dto.PaymentInfoResponse
+	if order.PaymentInfo != nil {
+		paymentInfo = dto.PaymentInfoResponse{
+			ID:                 order.PaymentInfo.ID,
+			Amount:             order.PaymentInfo.Amount,
+			Status:             order.PaymentInfo.Status,
+			PaymentLink:        order.PaymentInfo.PaymentLink,
+			CancellationReason: order.PaymentInfo.CancellationReason,
+		}
+	}
+
+	data := dto.OrderData{
+		ID:              order.ID,
+		UserID:          order.UserID,
+		Status:          string(order.Status),
+		Total:           order.Total,
+		PaymentMethod:   string(order.PaymentMethod),
+		ShippingAddress: order.ShippingAddress,
+		ShippingFee:     order.ShippingFee,
+		PhoneNumber:     order.PhoneNumber,
+		PaymentInfo:     paymentInfo,
+		OrderItems:      orderItems,
+		CreatedAt:       order.CreatedAt,
+		UpdatedAt:       order.UpdatedAt,
+	}
+
+	return &dto.CreateOrderResponse{
+		Data:    data,
+		Message: "success",
+	}, nil
+}
+
+func (o *orderService) MapOrdersToCreateOrderResponses(ctx context.Context, orders []*models.Order) ([]*dto.CreateOrderResponse, error) {
+	var responses []*dto.CreateOrderResponse
+	for _, order := range orders {
+		resp, err := o.MapOrderToCreateOrderResponse(ctx, order)
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, resp)
+	}
+	return responses, nil
+}
+
+func (o *orderService) ListByUserId(ctx context.Context, userID uint) ([]*dto.CreateOrderResponse, error) {
+	orders, err := o.orderRepo.ListByUserId(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return o.MapOrdersToCreateOrderResponses(ctx, orders)
 }

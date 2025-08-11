@@ -89,8 +89,38 @@ func (d draftOrderGormRepository) GetsForDbUpdate(ctx context.Context) ([]models
 }
 
 func (d draftOrderGormRepository) CleanDraft(ctx context.Context) error {
-	err := d.db.WithContext(ctx).
+	// Get drafts to remove
+	var drafts []models.DraftOrder
+	if err := d.db.WithContext(ctx).
 		Where("to_order = ?", 0).
-		Delete(&models.DraftOrder{}).Error
-	return err
+		Find(&drafts).Error; err != nil {
+		return err
+	}
+
+	// Delete related order items
+	for _, draft := range drafts {
+		if err := d.db.WithContext(ctx).
+			Where("order_type = ? AND order_id = ?", "draft_order", draft.ID).
+			Delete(&models.OrderItem{}).Error; err != nil {
+			return err
+		}
+	}
+
+	// Xóa draft orders trước
+	if err := d.db.WithContext(ctx).
+		Where("to_order = ?", 0).
+		Delete(&models.DraftOrder{}).Error; err != nil {
+		return err
+	}
+
+	// Sau đó xóa payment info liên quan
+	for _, draft := range drafts {
+		if err := d.db.WithContext(ctx).
+			Where("id = ?", draft.PaymentInfoID).
+			Delete(&models.PaymentInfo{}).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

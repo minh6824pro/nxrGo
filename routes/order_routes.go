@@ -8,19 +8,19 @@ import (
 	"github.com/minh6824pro/nxrGO/event"
 	"github.com/minh6824pro/nxrGO/jwt"
 	"github.com/minh6824pro/nxrGO/middleware"
+	"github.com/minh6824pro/nxrGO/models"
 	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
 	serviceImpl "github.com/minh6824pro/nxrGO/services/impl"
 	"gorm.io/gorm"
 )
 
-func RegisterOrderRoutes(rg *gin.RouterGroup, db *gorm.DB) {
+func RegisterOrderRoutes(rg *gin.RouterGroup, db *gorm.DB, eventPub *event.ChannelEventPublisher) {
 	productVariantRepo := repoImpl.NewProductVariantGormRepository(db)
 	orderItemRepo := repoImpl.NewOrderItemGormRepository(db)
 	orderRepo := repoImpl.NewOrderGormRepository(db)
 	paymentInfoRepo := repoImpl.NewPaymentInfoGormImpl(db)
 	draftOrderRepo := repoImpl.NewDraftOrderGormRepository(db)
 	productVariantCache := cache.NewProductVariantRedisService(configs.RedisClient, configs.RedisCtx)
-	eventPub := event.NewChannelEventPublisher()
 	orderService := serviceImpl.NewOrderService(db, productVariantRepo, orderItemRepo, orderRepo, draftOrderRepo, paymentInfoRepo, productVariantCache, eventPub)
 	orderController := controllers.NewOrderController(orderService)
 
@@ -33,5 +33,13 @@ func RegisterOrderRoutes(rg *gin.RouterGroup, db *gorm.DB) {
 		order.POST("", orderController.Create)
 		order.GET("/:id", orderController.GetById)
 		order.POST("/updatedb", orderController.UpdateDb)
+		order.GET("/status", orderController.GetByStatus)
+		order.POST("/rebuy/:id", orderController.ReBuy)
+		order.GET("", orderController.List)
+
+	}
+	order.Use(authMiddleware.RequireRole(models.RoleAdmin))
+	{
+		order.PATCH("/:id", orderController.UpdateOrderStatus)
 	}
 }

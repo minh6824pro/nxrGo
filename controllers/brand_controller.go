@@ -24,6 +24,15 @@ func NewBrandController(s services.BrandService) *BrandController {
 	return &BrandController{s}
 }
 
+// Create godoc
+// @Summary      Create a new brand
+// @Description  Create a new brand with the input payload
+// @Tags         brands
+// @Accept       json
+// @Produce      json
+// @Param        brand  body      dto.CreateBrandInput  true  "Create brand payload"
+// @Success      201    {object}  dto.BrandResponse
+// @Router       /brands [post]
 func (c *BrandController) Create(ctx *gin.Context) {
 	var b dto.CreateBrandInput
 	if err := ctx.ShouldBindJSON(&b); err != nil {
@@ -51,6 +60,15 @@ func (c *BrandController) Create(ctx *gin.Context) {
 	ctx.JSON(http.StatusCreated, createdBrand)
 }
 
+// GetByID godoc
+// @Summary      Get brand by id
+// @Description  Get brand by id
+// @Tags         brands
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Brand ID"
+// @Success      200 {object} dto.BrandResponse
+// @Router       /brands/{id} [get]
 func (c *BrandController) GetByID(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 	b, err := c.service.GetByID(ctx.Request.Context(), uint(id))
@@ -85,6 +103,15 @@ func (c *BrandController) Update(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, b)
 }
 
+// Delete godoc
+// @Summary      Delete brand by id
+// @Description  Delete brand by id
+// @Tags         brands
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Brand ID"
+// @Success      200 "Deleted successfully"
+// @Router       /brands/{id} [delete]
 func (c *BrandController) Delete(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 	if err := c.service.Delete(ctx.Request.Context(), uint(id)); err != nil {
@@ -98,6 +125,14 @@ func (c *BrandController) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
+// List godoc
+// @Summary      Get list of brands
+// @Description  Get list of brands
+// @Tags         brands
+// @Accept       json
+// @Produce      json
+// @Success      200 {array} dto.BrandResponse "Success response with brand data"
+// @Router       /brands [get]
 func (c *BrandController) List(ctx *gin.Context) {
 	list, err := c.service.List(ctx.Request.Context())
 	if err != nil {
@@ -107,6 +142,16 @@ func (c *BrandController) List(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, list)
 }
 
+// Patch godoc
+// @Summary      Patch brand by id
+// @Description  Patch brand by id
+// @Tags         brands
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Brand ID"
+// @Param        brand body dto.UpdateBrandInput true "Patch brand request"
+// @Success      200 {object} dto.BrandResponse "Success response with brand data"
+// @Router       /brands/{id} [patch]
 func (c *BrandController) Patch(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 

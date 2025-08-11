@@ -25,7 +25,7 @@ func (merchantService *merchantService) GetByID(ctx context.Context, id uint) (*
 	return merchantService.repo.GetByID(ctx, id)
 }
 
-//func (merchantService *merchantService) Update(ctx context.Context, m *models.Merchant) error {
+//func (merchantService *merchantService) UpdateOrderStatus(ctx context.Context, m *models.Merchant) error {
 //	existing, err := merchantService.repo.GetByID(ctx, m.ID)
 //
 //	if err != nil {
@@ -37,7 +37,7 @@ func (merchantService *merchantService) GetByID(ctx context.Context, id uint) (*
 //
 //	existing.Name = m.Name
 //
-//	return merchantService.repo.Update(ctx, existing)
+//	return merchantService.repo.UpdateOrderStatus(ctx, existing)
 //}
 
 func (merchantService *merchantService) Delete(ctx context.Context, id uint) error {

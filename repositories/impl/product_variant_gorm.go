@@ -8,6 +8,7 @@ import (
 	"github.com/minh6824pro/nxrGO/models"
 	"github.com/minh6824pro/nxrGO/repositories"
 	"gorm.io/gorm"
+	"log"
 	"net/http"
 )
 
@@ -93,34 +94,53 @@ func (r *productVariantRepository) GetByIDSForRedisCache(ctx context.Context, id
 	}
 
 	// Struct for quantity reserved in draft_orders
-	type ReservedQty struct {
+	type ReservedQtyWithProduct struct {
 		ProductVariantID uint
 		TotalQuantity    uint
+		ProductID        uint
+		ProductName      string
 	}
 
-	var reserved []ReservedQty
+	var reserved []ReservedQtyWithProduct
 	if err := r.db.WithContext(ctx).
 		Table("order_items oi").
-		Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
+		Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity, p.id as product_id, p.name as product_name").
 		Joins("INNER JOIN draft_orders do ON do.id = oi.order_id").
-		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order is null or do.to_order !=0 ", ids, "draft_order").
-		Group("oi.product_variant_id").
+		Joins("INNER JOIN product_variants pv ON pv.id = oi.product_variant_id").
+		Joins("INNER JOIN products p ON p.id = pv.product_id").
+		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND (do.to_order IS NULL OR do.to_order != 0)", ids, "draft_order").
+		Group("oi.product_variant_id, p.id, p.name").
 		Scan(&reserved).Error; err != nil {
 		return nil, err
 	}
 
-	reservedMap := make(map[uint]uint)
-	for _, r := range reserved {
-		reservedMap[r.ProductVariantID] = r.TotalQuantity
-	}
+	reservedMap := make(map[uint]struct {
+		TotalQty    uint
+		ProductID   uint
+		ProductName string
+	})
 
-	// Update real quantity
-	for i, v := range variants {
-		if qty, ok := reservedMap[v.ID]; ok {
-			variants[i].Quantity = v.Quantity - qty
+	for _, r := range reserved {
+		reservedMap[r.ProductVariantID] = struct {
+			TotalQty    uint
+			ProductID   uint
+			ProductName string
+		}{
+			TotalQty:    r.TotalQuantity,
+			ProductID:   r.ProductID,
+			ProductName: r.ProductName,
 		}
 	}
 
+	// UpdateOrderStatus real quantity
+	for i, v := range variants {
+		if info, ok := reservedMap[v.ID]; ok {
+			variants[i].Quantity = v.Quantity - info.TotalQty
+			variants[i].Product.ID = info.ProductID
+			variants[i].Product.Name = info.ProductName
+		}
+		log.Print(variants[i].Product.ID, " //", variants[i].Product.Name, "//", variants[i].Image)
+	}
 	return variants, nil
 }
 
@@ -132,7 +152,7 @@ func (r *productVariantRepository) UpdateQuantity(ctx context.Context, quantityM
 	}
 
 	for variantID, qty := range quantityMap {
-		// Update quantity for each product variant
+		// UpdateOrderStatus quantity for each product variant
 		if err := tx.Model(&models.ProductVariant{}).
 			Where("id = ?", variantID).
 			UpdateColumn("quantity", gorm.Expr("quantity - ?", qty)).Error; err != nil {

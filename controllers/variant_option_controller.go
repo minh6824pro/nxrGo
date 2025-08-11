@@ -20,6 +20,15 @@ func NewVariantOptionController(service services.VariantOptionService) *VariantO
 	return &VariantOptionController{service}
 }
 
+// GetByID godoc
+// @Summary      Get variant option by id
+// @Description  Get variant option by id
+// @Tags         variant-options
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Variant Option ID"
+// @Success      200 {object} models.VariantOption
+// @Router       /variant_options/{id} [get]
 func (c *VariantOptionController) GetByID(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 	m, err := c.service.GetByID(ctx.Request.Context(), uint(id))
@@ -31,6 +40,15 @@ func (c *VariantOptionController) GetByID(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, m)
 }
 
+// Create godoc
+// @Summary      Create a new variant option
+// @Description  Create a new variant option with input payload
+// @Tags         variant-options
+// @Accept       json
+// @Produce      json
+// @Param        variantOption body dto.CreateVariantOptionInput true "Create variant option payload"
+// @Success      201 {object} models.VariantOption
+// @Router       /variant_options [post]
 func (c *VariantOptionController) Create(ctx *gin.Context) {
 	var v dto.CreateVariantOptionInput
 	if err := ctx.ShouldBind(&v); err != nil {
@@ -56,6 +74,14 @@ func (c *VariantOptionController) Create(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, createdVariantOption)
 }
 
+// List godoc
+// @Summary      Get list of variant options
+// @Description  Get list of variant options
+// @Tags         variant-options
+// @Accept       json
+// @Produce      json
+// @Success      200 {array} models.VariantOption
+// @Router       /variant_options [get]
 func (c *VariantOptionController) List(ctx *gin.Context) {
 	list, err := c.service.List(ctx.Request.Context())
 	if err != nil {
@@ -65,6 +91,15 @@ func (c *VariantOptionController) List(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, list)
 }
 
+// Delete godoc
+// @Summary      Delete variant option by id
+// @Description  Delete variant option by id
+// @Tags         variant-options
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Variant Option ID"
+// @Success      200 "Deleted successfully"
+// @Router       /variant_options/{id} [delete]
 func (c *VariantOptionController) Delete(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 	if err := c.service.Delete(ctx.Request.Context(), uint(id)); err != nil {
@@ -73,6 +108,17 @@ func (c *VariantOptionController) Delete(ctx *gin.Context) {
 	}
 	ctx.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
+
+// Patch godoc
+// @Summary      Patch variant option by id
+// @Description  Patch variant option by id
+// @Tags         variant-options
+// @Accept       json
+// @Produce      json
+// @Param        id path string true "Variant Option ID"
+// @Param        variantOption body dto.UpdateVariantOptionInput true "Patch variant option request"
+// @Success      200 {object} models.VariantOption
+// @Router       /variant_options/{id} [patch]
 func (c *VariantOptionController) Patch(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 

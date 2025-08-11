@@ -83,7 +83,41 @@ func (o orderGormRepository) GetById(ctx context.Context, orderID uint) (*models
 	return &m, nil
 }
 
-func (o orderGormRepository) Save(ctx context.Context, order *models.Order) error {
-	//TODO implement me
-	panic("implement me")
+func (o orderGormRepository) Update(ctx context.Context, order *models.Order) error {
+	if err := o.db.WithContext(ctx).Save(order).Error; err != nil {
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) {
+			if mysqlErr.Number == 1062 {
+				return customErr.NewError(customErr.DUPLICATED_ERROR, "Merchant already exists", http.StatusBadRequest, nil)
+			}
+		}
+		return customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+	}
+	return nil
+}
+
+func (o orderGormRepository) GetsByStatusAndUserId(ctx context.Context, status models.OrderStatus, userId uint) ([]*models.Order, error) {
+	var orders []*models.Order
+	err := o.db.WithContext(ctx).
+		Where("status = ? and user_id= ?", status, userId).
+		Find(&orders).Error
+	if err != nil {
+		return nil, err
+	}
+	return orders, nil
+}
+
+func (o orderGormRepository) ListByUserId(ctx context.Context, userID uint) ([]*models.Order, error) {
+	var orders []*models.Order
+
+	err := o.db.WithContext(ctx).
+		Preload("OrderItems").
+		Preload("PaymentInfo").
+		Where("user_id = ?", userID).
+		Find(&orders).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return orders, nil
 }

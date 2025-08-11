@@ -21,6 +21,15 @@ func NewProductController(s services.ProductService) *ProductController {
 	return &ProductController{s}
 }
 
+// Create godoc
+// @Summary      Create a new product
+// @Description  Create a new product
+// @Tags         products
+// @Accept       json
+// @Produce      json
+// @Param        product  body      dto.CreateProductInput  true  "Create product request"
+// @Success      201    {object}  models.Product  "Success response with product data"
+// @Router       /products [post]
 func (pc *ProductController) Create(c *gin.Context) {
 	var input dto.CreateProductInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -43,6 +52,14 @@ func (pc *ProductController) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "success", "id": id})
 }
 
+// List  godoc
+// @Summary      Get all product ( No preload relationship)
+// @Description  Get all product ( No preload relationship)
+// @Tags         products
+// @Accept       json
+// @Produce      json
+// @Success      200    {array}  models.Product  "Success response with product data"
+// @Router       /products [get]
 func (pc *ProductController) List(ctx *gin.Context) {
 	list, err := pc.service.List(ctx.Request.Context())
 	if err != nil {
@@ -52,6 +69,15 @@ func (pc *ProductController) List(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, list)
 }
 
+// GetByID  godoc
+// @Summary      Get a product by id
+// @Description  Get a product by id
+// @Tags         products
+// @Accept       json
+// @Produce      json
+// @Param id path string true "Product ID"
+// @Success      200    {object}  models.Product  "Success response with product data"
+// @Router       /products/{id} [get]
 func (pc *ProductController) GetByID(ctx *gin.Context) {
 	id, _ := strconv.Atoi(ctx.Param("id"))
 	product, err := pc.service.GetByID(ctx.Request.Context(), uint(id))

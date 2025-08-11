@@ -28,9 +28,12 @@ func (r *productVariantRedisService) SaveProductVariantHash(pv models.ProductVar
 	key := fmt.Sprintf(ProductVariantKeyPattern, pv.ID)
 
 	err := r.client.HSet(r.ctx, key, map[string]interface{}{
-		"id":       pv.ID,
-		"quantity": pv.Quantity,
-		"price":    pv.Price,
+		"id":          pv.ID,
+		"quantity":    pv.Quantity,
+		"price":       pv.Price,
+		"image":       pv.Image,
+		"productName": pv.Product.Name,
+		"productId":   pv.Product.ID,
 	}).Err()
 	if err != nil {
 		return err

@@ -12,5 +12,7 @@ type OrderRepository interface {
 	Delete(ctx context.Context, id uint) error
 	GetByIdAndUserId(ctx context.Context, orderID uint, userID uint) (*models.Order, error)
 	GetById(ctx context.Context, orderID uint) (*models.Order, error)
-	Save(ctx context.Context, order *models.Order) error
+	Update(ctx context.Context, order *models.Order) error
+	GetsByStatusAndUserId(ctx context.Context, status models.OrderStatus, userId uint) ([]*models.Order, error)
+	ListByUserId(ctx context.Context, userID uint) ([]*models.Order, error)
 }

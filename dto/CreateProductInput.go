@@ -14,7 +14,6 @@ type CreateProductInput struct {
 	MerchantID *uint `json:"merchant_id" binding:"required"`
 	//MerchantName *string `json:"merchant_name,omitempty"`
 
-	// Danh sách các variant của product
 	Variants []CreateProductVariantInput `json:"variants" binding:"required"`
 }
 
@@ -22,9 +21,8 @@ type CreateProductVariantInput struct {
 	Price     float64 `json:"price" binding:"required"`
 	Quantity  uint    `json:"quantity" binding:"required"`
 	Image     string  `json:"image,omitempty"`
-	ProductID uint    `json:"category_id,omitempty"`
+	ProductID uint    `json:"product_id,omitempty"`
 
-	// Danh sách các option-value cho variant (VD: Color=Red, Size=M)
 	OptionValues []VariantOptionValueInput `json:"option_values" binding:"required"`
 }
 

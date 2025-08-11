@@ -1,6 +1,11 @@
 package utils
 
-import "github.com/minh6824pro/nxrGO/models"
+import (
+	"fmt"
+	customErr "github.com/minh6824pro/nxrGO/errors"
+	"github.com/minh6824pro/nxrGO/models"
+	"net/http"
+)
 
 type OrderEvent string
 
@@ -44,11 +49,11 @@ var stateMachine = map[models.OrderStatus]map[OrderEvent]models.OrderStatus{
 	},
 }
 
-func CanTransition(current models.OrderStatus, event OrderEvent) (models.OrderStatus, bool) {
+func CanTransitionOrder(current models.OrderStatus, event OrderEvent) (models.OrderStatus, error) {
 	if nextStates, ok := stateMachine[current]; ok {
 		if next, ok := nextStates[event]; ok {
-			return next, true
+			return next, nil
 		}
 	}
-	return "", false
+	return "", customErr.NewError(customErr.BAD_REQUEST, fmt.Sprintf("Cant transition from %s to %s", current, event), http.StatusBadRequest, nil)
 }

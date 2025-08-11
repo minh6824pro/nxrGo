@@ -19,6 +19,15 @@ func NewAuthController(authService services.AuthService) *AuthController {
 	return &AuthController{authService}
 }
 
+// Register godoc
+// @Summary User registration
+// @Description Register a new user with email and password
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param registerRequest body dto.RegisterRequest true "Register request payload"
+// @Success 201 {object} dto.AuthResponse "Successfully registered"
+// @Router /auth/register [post]
 func (a *AuthController) Register(c *gin.Context) {
 	var req dto.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -48,6 +57,15 @@ func (a *AuthController) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, resp)
 }
 
+// Login godoc
+// @Summary User Login
+// @Description Login to get access token
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param registerRequest body dto.LoginRequest true "Register request payload"
+// @Success 200 {object} dto.AuthResponse "Successfully registered"
+// @Router /auth/login [post]
 func (a *AuthController) Login(c *gin.Context) {
 	var req dto.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -76,6 +94,15 @@ func (a *AuthController) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// GetProfile godoc
+// @Summary Get current profile
+// @Description Get current profile
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Security     BearerAuth
+// @Success 200 {object} models.User
+// @Router /user/profile [get]
 func (a *AuthController) GetProfile(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -100,6 +127,14 @@ func (a *AuthController) GetProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": profile})
 }
 
+// RefreshToken godoc
+// @Summary Refresh Token
+// @Description Refresh access token with body "refresh_token"
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param refreshToken body object true "Refresh token payload"
+// @Router /auth/refresh [post]
 func (a *AuthController) RefreshToken(c *gin.Context) {
 	var req struct {
 		RefreshToken string `json:"refresh_token" binding:"required"`

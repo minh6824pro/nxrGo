@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// @swaggertype object{id=integer,name=string,merchant_id=integer,brand_id=integer,category_id=integer,average_rating=number,number_rating=number,image=string,description=string,active=boolean,merchant=object,brand=object,category=object,variants=array}
 type Product struct {
 	ID            uint    `gorm:"primaryKey;autoIncrement" json:"id"`
 	Name          string  `gorm:"type:varchar(255);not null" json:"name"`
