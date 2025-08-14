@@ -2,9 +2,9 @@ package impl
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/minh6824pro/nxrGO/cache"
+	"github.com/minh6824pro/nxrGO/configs"
 	"github.com/minh6824pro/nxrGO/dto"
 	customErr "github.com/minh6824pro/nxrGO/errors"
 	"github.com/minh6824pro/nxrGO/event"
@@ -13,8 +13,8 @@ import (
 	"github.com/minh6824pro/nxrGO/services"
 	"github.com/minh6824pro/nxrGO/utils"
 	"github.com/payOSHQ/payos-lib-golang"
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"log"
 	"net/http"
 	"strconv"
@@ -30,13 +30,14 @@ type orderService struct {
 	paymentInfoRepo     repositories.PaymentInfoRepository
 	productVariantCache cache.ProductVariantRedis
 	eventBus            event.EventPublisher
+	updateStockAgg      *event.UpdateStockAggregator
 }
 
 func NewOrderService(db *gorm.DB, productVariantRepo repositories.ProductVariantRepository, orderItemRepo repositories.OrderItemRepository,
 	orderRepo repositories.OrderRepository, draftOrderRepo repositories.DraftOrderRepository,
 	paymentInfoRepo repositories.PaymentInfoRepository,
 	productVariantCache cache.ProductVariantRedis,
-	eventBus event.EventPublisher) services.OrderService {
+	eventBus event.EventPublisher, updateStockAgg *event.UpdateStockAggregator) services.OrderService {
 	service := &orderService{
 		db:                  db,
 		productVariantRepo:  productVariantRepo,
@@ -46,6 +47,7 @@ func NewOrderService(db *gorm.DB, productVariantRepo repositories.ProductVariant
 		paymentInfoRepo:     paymentInfoRepo,
 		productVariantCache: productVariantCache,
 		eventBus:            eventBus,
+		updateStockAgg:      updateStockAgg,
 	}
 	service.registerEventHandlers()
 
@@ -53,9 +55,16 @@ func NewOrderService(db *gorm.DB, productVariantRepo repositories.ProductVariant
 }
 
 func (o *orderService) Create(ctx context.Context, input dto.CreateOrderInput) (*dto.CreateOrderResponse, error) {
-	var total float64 = 0
+	var orderItems []models.OrderItem
+	var draftOrder models.DraftOrder
+	err := o.productVariantCache.PingRedis(ctx)
+	if err != nil {
+		draftOrder, orderItems, err = o.CreateOrderWithDb(ctx, input)
+	} else {
 
-	luaScript := `
+		var total float64 = 0
+
+		luaScript := `
 local itemCount = tonumber(ARGV[1])
 local expectedTotal = tonumber(ARGV[2]) -- total client gửi vào
 local idx = 3
@@ -121,180 +130,152 @@ return {"OK"}
 
 `
 
-	// build keys & args
-	keys := make([]string, 0, len(input.OrderItems))
-	args := []interface{}{len(input.OrderItems), input.Total - input.ShippingFee}
-	for _, oi := range input.OrderItems {
-		keys = append(keys, fmt.Sprintf(cache.ProductVariantKeyPattern, oi.ProductVariantID))
-		// ARGV: variantId, quantity, price (Lua uses toNumber when needed)
-		args = append(args, oi.ProductVariantID, oi.Quantity, oi.Price)
-	}
-
-	// Helper to safely convert interface{} to string
-	toStr := func(v interface{}) string {
-		switch t := v.(type) {
-		case string:
-			return t
-		case []byte:
-			return string(t)
-		default:
-			return fmt.Sprintf("%v", v)
-		}
-	}
-
-	const maxRetries = 2
-	var res interface{}
-	var err error
-
-	// First run of the Lua script
-	res, err = o.productVariantCache.EvalLua(ctx, luaScript, keys, args...)
-	if err != nil {
-		return nil, err
-	}
-
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		arr, ok := res.([]interface{})
-		if !ok || len(arr) == 0 {
-			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected redis lua response", http.StatusInternalServerError, nil)
+		// build keys & args
+		keys := make([]string, 0, len(input.OrderItems))
+		args := []interface{}{len(input.OrderItems), input.Total - input.ShippingFee}
+		for _, oi := range input.OrderItems {
+			keys = append(keys, fmt.Sprintf(cache.ProductVariantKeyPattern, oi.ProductVariantID))
+			// ARGV: variantId, quantity, price (Lua uses toNumber when needed)
+			args = append(args, oi.ProductVariantID, oi.Quantity, oi.Price)
 		}
 
-		status := toStr(arr[0])
-
-		switch status {
-		case "MISS":
-			// arr[1:] contains list of missing variantIds
-			var missingIDs []uint
-			for i := 1; i < len(arr); i++ {
-				idStr := toStr(arr[i])
-				id64, parseErr := strconv.ParseUint(idStr, 10, 64)
-				if parseErr != nil {
-					return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Invalid variant id from redis", http.StatusInternalServerError, nil)
-				}
-				missingIDs = append(missingIDs, uint(id64))
+		// Helper to safely convert interface{} to string
+		toStr := func(v interface{}) string {
+			switch t := v.(type) {
+			case string:
+				return t
+			case []byte:
+				return string(t)
+			default:
+				return fmt.Sprintf("%v", v)
 			}
-			log.Print("Redis key miss: ", missingIDs)
-
-			// Batch query DB once for all missingIDs
-			variants, err := o.productVariantRepo.GetByIDSForRedisCache(ctx, missingIDs)
-			if err != nil {
-				return nil, err
-			}
-
-			// If DB returns fewer records, return ITEM_NOT_FOUND error for missing ids
-			if len(variants) != len(missingIDs) {
-				found := map[uint]bool{}
-				for _, v := range variants {
-					found[v.ID] = true
-				}
-				for _, id := range missingIDs {
-					if !found[id] {
-						return nil, customErr.NewError(
-							customErr.ITEM_NOT_FOUND,
-							fmt.Sprintf("Product variant not found: %d", id),
-							http.StatusBadRequest, nil,
-						)
-					}
-				}
-			}
-
-			// Saved all queried variants to Redis as Hash
-			for _, pv := range variants {
-				// save as hash: id, quantity, price, image,productName, productId
-				if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
-					log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
-				}
-			}
-
-			// retry: run Lua script again
-			res, err = o.productVariantCache.EvalLua(ctx, luaScript, keys, args...)
-			if err != nil {
-				return nil, err
-			}
-			continue
-
-		case "INSUFFICIENT":
-			variantId := ""
-			if len(arr) > 1 {
-				variantId = toStr(arr[1])
-			}
-			log.Print("Redis key miss: ", variantId)
-			return nil, customErr.NewError(customErr.INSUFFICIENT_STOCK, fmt.Sprintf("Product variant : %s Insufficient stock", variantId), http.StatusBadRequest, nil)
-
-		case "INVALID_PRICE":
-			variantId := ""
-			if len(arr) > 1 {
-				variantId = toStr(arr[1])
-			}
-			log.Print(fmt.Sprintf("Product %s invalid price: ", variantId))
-
-			return nil, customErr.NewError(customErr.INVALID_PRICE, fmt.Sprintf("Product variant: %s Price Invalid", variantId), http.StatusBadRequest, nil)
-		case "INVALID_TOTAL":
-			expectedTotal := float64(0)
-			if len(arr) > 1 {
-				expectedTotalStr := toStr(arr[1])
-				expectedTotal, err = strconv.ParseFloat(expectedTotalStr, 64)
-				if err != nil {
-					return nil, customErr.NewError(customErr.INVALID_PRICE, "Total price not match", http.StatusBadRequest, nil)
-				}
-				expectedTotal += input.ShippingFee
-			}
-			log.Print("Invalid total, expected: ", expectedTotal)
-
-			return nil, customErr.NewError(customErr.INVALID_PRICE, fmt.Sprintf("Total price not match, expected: %.2f", expectedTotal), http.StatusBadRequest, nil)
-		case "OK":
-			// all OK -> calculate total from input (price already verified)
-			for _, oi := range input.OrderItems {
-				total += oi.Price * float64(oi.Quantity)
-			}
-			// exit loop to continue creating order
-			attempt = maxRetries // break outer loop
-			break
-
-		default:
-			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected Lua script status", http.StatusInternalServerError, nil)
 		}
-	}
 
-	// If after maxRetries still not OK => error
-	resArr, _ := res.([]interface{})
-	if len(resArr) == 0 || toStr(resArr[0]) != "OK" {
-		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Failed to reserve stock after retries", http.StatusInternalServerError, nil)
-	}
-
-	// Create Draft Order
-	draftOrder := models.DraftOrder{
-		UserID:          input.UserID,
-		Status:          models.OrderStatePending,
-		Total:           input.Total,
-		ShippingAddress: input.ShippingAddress,
-		ShippingFee:     input.ShippingFee,
-		PaymentMethod:   input.PaymentMethod,
-		PhoneNumber:     input.PhoneNumber,
-	}
-	if err := o.draftOrderRepo.Create(ctx, &draftOrder); err != nil {
-		return nil, customErr.NewError(customErr.INTERNAL_ERROR, fmt.Sprintf("Draft order creation error: %v", err.Error()), http.StatusBadRequest, nil)
-	}
-
-	// Create order items
-	var orderItems []models.OrderItem
-	for _, item := range input.OrderItems {
-		orderItem := models.OrderItem{
-			OrderID:          draftOrder.ID,
-			ProductVariantID: item.ProductVariantID,
-			OrderType:        models.OrderTypeDraftOrder,
-			Quantity:         item.Quantity,
-			Price:            item.Price,
-			TotalPrice:       item.Price * float64(item.Quantity),
-		}
-		if err := o.orderItemRepo.Create(ctx, &orderItem); err != nil {
+		const maxRetries = 2
+		var res interface{}
+		// First run of the Lua script
+		res, err = o.productVariantCache.EvalLua(ctx, luaScript, keys, args...)
+		if err != nil {
 			return nil, err
 		}
-		orderItems = append(orderItems, orderItem)
+
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			arr, ok := res.([]interface{})
+			if !ok || len(arr) == 0 {
+				return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected redis lua response", http.StatusInternalServerError, nil)
+			}
+
+			status := toStr(arr[0])
+
+			switch status {
+			case "MISS":
+				// Get list of missing variantIds
+				var missingIDs []uint
+				for i := 1; i < len(arr); i++ {
+					idStr := toStr(arr[i])
+					id64, parseErr := strconv.ParseUint(idStr, 10, 64)
+					if parseErr != nil {
+						return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Invalid variant id from redis", http.StatusInternalServerError, nil)
+					}
+					missingIDs = append(missingIDs, uint(id64))
+				}
+				log.Print("Redis key miss: ", missingIDs)
+
+				_, err := o.loadAndCacheProductVariants(ctx, missingIDs)
+				if err != nil {
+					return nil, err
+				}
+
+				// retry: run Lua script again
+				res, err = o.productVariantCache.EvalLua(ctx, luaScript, keys, args...)
+				if err != nil {
+					return nil, err
+				}
+				continue
+
+			case "INSUFFICIENT":
+				variantId := ""
+				if len(arr) > 1 {
+					variantId = toStr(arr[1])
+				}
+				log.Print("Redis key miss: ", variantId)
+				return nil, customErr.NewError(customErr.INSUFFICIENT_STOCK, fmt.Sprintf("Product variant : %s Insufficient stock", variantId), http.StatusBadRequest, nil)
+
+			case "INVALID_PRICE":
+				variantId := ""
+				if len(arr) > 1 {
+					variantId = toStr(arr[1])
+				}
+				log.Print(fmt.Sprintf("Product %s invalid price: ", variantId))
+
+				return nil, customErr.NewError(customErr.INVALID_PRICE, fmt.Sprintf("Product variant: %s Price Invalid", variantId), http.StatusBadRequest, nil)
+			case "INVALID_TOTAL":
+				expectedTotal := float64(0)
+				if len(arr) > 1 {
+					expectedTotalStr := toStr(arr[1])
+					expectedTotal, err = strconv.ParseFloat(expectedTotalStr, 64)
+					if err != nil {
+						return nil, customErr.NewError(customErr.INVALID_PRICE, "Total price not match", http.StatusBadRequest, nil)
+					}
+					expectedTotal += input.ShippingFee
+				}
+				log.Print("Invalid total, expected: ", expectedTotal)
+
+				return nil, customErr.NewError(customErr.INVALID_PRICE, fmt.Sprintf("Total price not match, expected: %.2f", expectedTotal), http.StatusBadRequest, nil)
+			case "OK":
+				// all OK -> calculate total from input (price already verified)
+				for _, oi := range input.OrderItems {
+					total += oi.Price * float64(oi.Quantity)
+				}
+				// exit loop to continue creating order
+				attempt = maxRetries // break outer loop
+				break
+
+			default:
+				return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected Lua script status", http.StatusInternalServerError, nil)
+			}
+		}
+
+		// If after maxRetries still not OK => error
+		resArr, _ := res.([]interface{})
+		if len(resArr) == 0 || toStr(resArr[0]) != "OK" {
+			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Failed to reserve stock after retries", http.StatusInternalServerError, nil)
+		}
+
+		// Create Draft Order
+		draftOrder = models.DraftOrder{
+			UserID:          input.UserID,
+			Status:          models.OrderStatePending,
+			ShippingAddress: input.ShippingAddress,
+			PaymentMethod:   input.PaymentMethod,
+			PhoneNumber:     input.PhoneNumber,
+		}
+		if err := o.draftOrderRepo.Create(ctx, &draftOrder); err != nil {
+			return nil, customErr.NewError(customErr.INTERNAL_ERROR, fmt.Sprintf("Draft order creation error: %v", err.Error()), http.StatusBadRequest, nil)
+		}
+
+		// Create order items
+		for _, item := range input.OrderItems {
+			orderItem := models.OrderItem{
+				OrderID:          draftOrder.ID,
+				ProductVariantID: item.ProductVariantID,
+				OrderType:        models.OrderTypeDraftOrder,
+				Quantity:         item.Quantity,
+				Price:            item.Price,
+				TotalPrice:       item.Price * float64(item.Quantity),
+			}
+			if err := o.orderItemRepo.Create(ctx, &orderItem); err != nil {
+				return nil, err
+			}
+			orderItems = append(orderItems, orderItem)
+		}
 	}
 
-	if err := o.CreatePayment(ctx, &draftOrder, orderItems); err != nil {
+	// Create PaymentInfo
+	if err := o.CreatePayment(ctx, &draftOrder, orderItems, input.Total, input.ShippingFee); err != nil {
 		return nil, err
 	}
+
 	// Convert into Real order if payment method = COD
 	if draftOrder.PaymentMethod == models.PaymentMethodCOD {
 		order, err := o.DraftOrderToOrder(ctx, &draftOrder, orderItems)
@@ -309,23 +290,37 @@ return {"OK"}
 		return o.MapDraftOrderToCreateOrderResponse(ctx, &draftOrder)
 	}
 }
-func (o *orderService) CreatePayment(ctx context.Context, draftOrder *models.DraftOrder, orderItems []models.OrderItem) error {
+func (o *orderService) CreatePayment(ctx context.Context, draftOrder *models.DraftOrder, orderItems []models.OrderItem, total float64, shippingFee float64) error {
 
+	var paymentInfo = &models.PaymentInfo{
+		ID:          GeneratePaymentInfoID(),
+		Total:       total,
+		ShippingFee: shippingFee,
+		OrderID:     draftOrder.ID,
+		OrderType:   models.OrderTypeDraftOrder,
+		Status:      models.PaymentPending,
+	}
+	if err := o.paymentInfoRepo.Create(ctx, paymentInfo); err != nil {
+		log.Printf(err.Error(), "while creating payment info")
+		return customErr.NewError(customErr.INTERNAL_ERROR, "CreatePayment error", http.StatusInternalServerError, err)
+	}
 	paymentLink := ""
 	if draftOrder.PaymentMethod == models.PaymentMethodBank {
 		// Create PayOS payment link
-		paymentData, err := CreatePayOSPayment(int(draftOrder.ID), 10000, MapOrderItemsToPayOSItems(orderItems, int(draftOrder.ShippingFee)), "Thanh toán đơn hàng", "http://localhost:5173/success", "http://localhost:5173/cancel")
+		paymentData, err := CreatePayOSPayment(paymentInfo.ID, 10000, MapOrderItemsToPayOSItems(orderItems, int(shippingFee)), fmt.Sprintf("Thanh toán đơn hàng %d", draftOrder.ID), "http://localhost:5173/success", "http://localhost:5173/cancel")
 		if err != nil {
 			log.Println("CreatePayment error", err.Error())
+			log.Print(paymentInfo.ID)
 			return customErr.NewError(customErr.INTERNAL_ERROR, "CreatePayment error", http.StatusInternalServerError, err)
 		}
 		paymentLink = paymentData.CheckoutUrl
 
 		// Publish event after create payOS link
 		paymentEvent := event.PayOSPaymentCreatedEvent{
-			DraftOrderID:  draftOrder.ID,
+			Id:            paymentInfo.ID,
+			OrderID:       draftOrder.ID,
 			PaymentLink:   paymentData.CheckoutUrl,
-			Amount:        float64(10000),
+			Total:         10000,
 			PaymentMethod: string(draftOrder.PaymentMethod),
 			CreatedAt:     time.Now(),
 		}
@@ -336,53 +331,64 @@ func (o *orderService) CreatePayment(ctx context.Context, draftOrder *models.Dra
 		log.Printf("PayOs payment created for order %d: %s", draftOrder.ID, paymentData.CheckoutUrl)
 
 	}
-	var paymentInfo = &models.PaymentInfo{
-		Amount:      draftOrder.Total,
-		Status:      models.PaymentPending,
-		PaymentLink: paymentLink,
-	}
-	if err := o.paymentInfoRepo.Create(ctx, paymentInfo); err != nil {
-		log.Printf(err.Error(), "while creating payment info")
-		return customErr.NewError(customErr.INTERNAL_ERROR, "CreatePayment error", http.StatusInternalServerError, err)
-	}
 
-	draftOrder.PaymentInfo = paymentInfo
+	paymentInfo.PaymentLink = paymentLink
+	if err := o.paymentInfoRepo.Save(ctx, paymentInfo); err != nil {
+		log.Printf(err.Error(), "while saving payment info")
+		return customErr.NewError(customErr.INTERNAL_ERROR, "Save Payment error", http.StatusInternalServerError, err)
+	}
+	draftOrder.PaymentInfos = append(draftOrder.PaymentInfos, *paymentInfo)
 	if err := o.draftOrderRepo.Save(ctx, draftOrder); err != nil {
 		log.Printf(err.Error(), "while saving draftOrder")
 		return err
 	}
-
 	return nil
 }
 
 func (o *orderService) DraftOrderToOrder(ctx context.Context, draftOrder *models.DraftOrder, orderItems []models.OrderItem) (models.Order, error) {
+
 	order := models.Order{
 		UserID:          draftOrder.UserID,
 		Status:          draftOrder.Status,
-		Total:           draftOrder.Total,
 		PaymentMethod:   draftOrder.PaymentMethod,
 		ShippingAddress: draftOrder.ShippingAddress,
-		ShippingFee:     draftOrder.ShippingFee,
 		PhoneNumber:     draftOrder.PhoneNumber,
-		PaymentInfoID:   draftOrder.PaymentInfoID,
-		PaymentInfo:     draftOrder.PaymentInfo,
+		OrderItems:      orderItems,
+		PaymentInfos:    draftOrder.PaymentInfos,
 	}
 	if err := o.orderRepo.Create(ctx, &order); err != nil {
 		return order, err
 	}
+	log.Print(order.OrderItems)
+	//// Change Order Item ref
+	//var orderItemsNew []models.OrderItem
+	//for _, oi := range orderItems {
+	//	oi.OrderID = order.ID
+	//	oi.OrderType = models.OrderTypeOrder
+	//	if err := o.orderItemRepo.Save(ctx, &oi); err != nil {
+	//		return order, err
+	//	}
+	//	orderItemsNew = append(orderItemsNew, oi)
+	//}
+	//order.OrderItems = orderItemsNew
+	//
+	//// Change Payment Info ref
+	//var paymentInfoNew []models.PaymentInfo
+	//
+	//for _, pi := range draftOrder.PaymentInfos {
+	//	pi.OrderID = order.ID
+	//	pi.OrderType = models.OrderTypeOrder
+	//	if err := o.paymentInfoRepo.Save(ctx, &pi); err != nil {
+	//		return order, err
+	//	}
+	//	log.Println(pi)
+	//	paymentInfoNew = append(paymentInfoNew, pi)
+	//}
 
-	orderItemsNew := []models.OrderItem{}
-	for _, oi := range orderItems {
-		oi.OrderID = order.ID
-		oi.OrderType = models.OrderTypeOrder
-		if err := o.orderItemRepo.Save(ctx, &oi); err != nil {
-			return order, err
-		}
-		orderItemsNew = append(orderItemsNew, oi)
-	}
-	order.OrderItems = orderItemsNew
-
+	//order.PaymentInfos = paymentInfoNew
 	draftOrder.ToOrderID = &order.ID
+	draftOrder.PaymentInfos = nil
+	draftOrder.OrderItems = nil
 	if err := o.draftOrderRepo.Save(ctx, draftOrder); err != nil {
 		return order, err
 	}
@@ -394,32 +400,35 @@ func (o *orderService) DraftOrderToOrderResponse(ctx context.Context, draftOrder
 		ID:              draftOrder.ID,
 		UserID:          draftOrder.UserID,
 		Status:          draftOrder.Status,
-		Total:           draftOrder.Total,
 		PaymentMethod:   draftOrder.PaymentMethod,
 		ShippingAddress: draftOrder.ShippingAddress,
-		ShippingFee:     draftOrder.ShippingFee,
 		PhoneNumber:     draftOrder.PhoneNumber,
-		PaymentInfoID:   draftOrder.PaymentInfoID,
-		PaymentInfo:     draftOrder.PaymentInfo,
+		PaymentInfos:    draftOrder.PaymentInfos,
 		OrderItems:      orderItems,
 	}
 	return order, nil
 }
 
-func (o *orderService) PayOSPaymentSuccess(ctx context.Context, draftOrderID uint) {
-	draftOrder, err := o.draftOrderRepo.GetById(ctx, draftOrderID)
+// TODO IMPLEMENT
+func (o *orderService) PayOSPaymentSuccess(ctx context.Context, paymentInfoID int64) {
+	paymentInfo, err := o.paymentInfoRepo.GetByID(ctx, paymentInfoID)
 	if err != nil {
 		log.Printf(err.Error(), "while getting draftOrder to update PayOSPayment")
 		return
 	}
-	if nextStatus, ok := utils.CanTransitionPayment(draftOrder.PaymentInfo.Status, utils.EventPaySuccess); ok {
-		draftOrder.PaymentInfo.Status = nextStatus
-		err = o.paymentInfoRepo.Save(ctx, draftOrder.PaymentInfo)
+	if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPaySuccess); ok {
+		paymentInfo.Status = nextStatus
+		err = o.paymentInfoRepo.Save(ctx, paymentInfo)
 		if err != nil {
 			log.Printf(err.Error(), "while saving payment info")
 		}
 	} else {
-		log.Printf("error while transitioning payment info from PayOSPayment payment id: %d", draftOrder.PaymentInfoID)
+		log.Printf("error 1 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
+	}
+	draftOrder, err := o.draftOrderRepo.GetById(ctx, paymentInfo.OrderID)
+	if err != nil {
+		log.Printf(err.Error(), "while getting draftOrder")
+		return
 	}
 	_, err = o.DraftOrderToOrder(ctx, draftOrder, draftOrder.OrderItems)
 	if err != nil {
@@ -454,17 +463,15 @@ func MapOrderItemsToPayOSItems(orderItem []models.OrderItem, shippingFee int) []
 
 func (o *orderService) registerEventHandlers() {
 	o.eventBus.Subscribe(func(e event.PayOSPaymentCreatedEvent) {
-		log.Printf("Tracking payment created for order %d: %s", e.DraftOrderID, e.PaymentLink)
+		log.Printf("Tracking payment created for order %d: %s", e.Id, e.PaymentLink)
 		var data *payos.PaymentLinkDataType
 		for {
 			var err error
-			data, err = payos.GetPaymentLinkInformation(strconv.FormatUint(uint64(e.DraftOrderID), 10))
+			data, err = payos.GetPaymentLinkInformation(strconv.FormatInt(e.Id, 10))
 			if err != nil {
 				log.Printf("Error getting payment info: %v", err)
 				return
 			}
-
-			log.Println("Current status:", data.Status)
 
 			if data.Status != "PENDING" {
 				break
@@ -473,22 +480,24 @@ func (o *orderService) registerEventHandlers() {
 			time.Sleep(10 * time.Second)
 		}
 
-		if data.Status == "SUCCESS" {
-			o.PayOSPaymentSuccess(context.Background(), e.DraftOrderID)
+		if data.Status == "PAID" {
+			o.PayOSPaymentSuccess(context.Background(), e.Id)
+		} else {
+			o.PayOSPaymentCancelled(context.Background(), e.Id, data.Status)
 		}
-		log.Printf("Payment status updated and no longer pending for order %d", e.DraftOrderID)
-		o.PayOSPaymentCancelled(context.Background(), e.DraftOrderID, data.Status)
+		log.Printf("Payment status updated and no longer pending for order %d", e.Id)
 	})
 }
 
-func (o *orderService) PayOSPaymentCancelled(ctx context.Context, draftId uint, status string) {
-	draftOrder, err := o.draftOrderRepo.GetById(ctx, draftId)
+func (o *orderService) PayOSPaymentCancelled(ctx context.Context, paymentInfoId int64, status string) {
+	paymentInfo, err := o.paymentInfoRepo.GetByID(ctx, paymentInfoId)
 	if err != nil {
 		log.Printf(err.Error(), "while getting draftOrder to update PayOSPayment")
 		return
 	}
 	val := uint(0)
 
+	draftOrder, err := o.draftOrderRepo.GetById(ctx, paymentInfo.OrderID)
 	draftOrder.ToOrderID = &val
 	if err := o.draftOrderRepo.Save(ctx, draftOrder); err != nil {
 		log.Printf(err.Error(), "while saving draft order to update PayOSPayment Fail")
@@ -500,27 +509,30 @@ func (o *orderService) PayOSPaymentCancelled(ctx context.Context, draftId uint, 
 		log.Printf(err.Error(), "while incrementing stock variant after cancelled payment")
 	}
 
-	if nextStatus, ok := utils.CanTransitionPayment(draftOrder.PaymentInfo.Status, utils.EventPayCancel); ok {
-		draftOrder.PaymentInfo.Status = nextStatus
-		draftOrder.PaymentInfo.CancellationReason = "Webhook"
+	if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPayCancel); ok {
+		paymentInfo.Status = nextStatus
+		paymentInfo.CancellationReason = "Webhook"
 		now := time.Now()
-		draftOrder.PaymentInfo.CancellationAt = &now
-		err = o.paymentInfoRepo.Save(ctx, draftOrder.PaymentInfo)
+		paymentInfo.CancellationAt = &now
+		err = o.paymentInfoRepo.Save(ctx, paymentInfo)
 		if err != nil {
 			log.Printf(err.Error(), "while saving payment info")
 		}
 	} else {
-		log.Printf("error while transitioning payment info from PayOSPayment payment id: %d", draftOrder.PaymentInfoID)
+		log.Printf("error 2 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
 	}
 }
 
 func (o *orderService) UpdateQuantity(ctx context.Context) error {
+
+	// Get draft order that are converted to  order
 	draftOrders, err := o.draftOrderRepo.GetsForDbUpdate(ctx)
 	if err != nil {
 		return err
 	}
 	totalQuantityByVariant := make(map[uint]uint)
 
+	// Sum quantity for each key: Product Variant id
 	for _, d := range draftOrders {
 		log.Printf("Draft Order ID: %d, Order ID: %d", d.ID, d.ToOrderID)
 		order, err := o.orderRepo.GetById(ctx, *d.ToOrderID)
@@ -534,11 +546,12 @@ func (o *orderService) UpdateQuantity(ctx context.Context) error {
 	}
 	log.Printf("Total quantity of variants: %d", totalQuantityByVariant)
 
-	err = o.productVariantRepo.UpdateQuantity(ctx, totalQuantityByVariant)
+	err = o.productVariantRepo.DecreaseQuantity(ctx, totalQuantityByVariant)
 	if err != nil {
 		return err
 	}
 
+	// Delete draft order that are converted to order
 	for _, d := range draftOrders {
 		err := o.draftOrderRepo.Delete(ctx, d.ID)
 		if err != nil {
@@ -549,31 +562,22 @@ func (o *orderService) UpdateQuantity(ctx context.Context) error {
 
 	log.Printf("UpdateOrderStatus Db successfully")
 
-	var keys []uint
-	for k := range totalQuantityByVariant {
-		keys = append(keys, k)
-	}
-
-	// Reset redis cache
-	variants, err := o.productVariantRepo.GetByIDSForRedisCache(ctx, keys)
-	if err != nil {
-		return err
-	}
-
-	for _, pv := range variants {
-		// save as hash: id, quantity, price, image,productName, productId
-		if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
-			log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
+	// Delete redis cache
+	for key, _ := range totalQuantityByVariant {
+		err := o.productVariantCache.DeleteProductVariantHash(key)
+		if err != nil {
+			log.Print(err)
 		}
 	}
-	log.Printf("Reset Redis Cache successfully")
+	log.Println("map delete redis", totalQuantityByVariant)
+	log.Printf("Delete redis Cache successfully")
 
-	//Clean draft
+	//Clean draft order that can't be converted to order
 	err = o.CleanDraft(ctx)
 	if err != nil {
 		return err
 	}
-	log.Printf("Clean draft orders")
+	log.Printf("Cleaned draft orders")
 	return nil
 }
 
@@ -596,16 +600,24 @@ func (o *orderService) UpdateOrderStatus(ctx context.Context, orderId uint, even
 		return nil, err
 	}
 	if nextStatus, err := utils.CanTransitionOrder(order.Status, event); err != nil {
-		log.Printf(err.Error(), "///123456")
+		log.Printf(err.Error())
 		return nil, err
 	} else {
-		log.Printf("error while transitioning order status, order id: %d", order.ID)
+
+		// Increase stock if cancel before ship or  after completing return_shipping
+		if (nextStatus == models.OrderStateCancelled && models.IsBeforeOrderStatus(order.Status, models.OrderStateProcessing)) ||
+			nextStatus == models.OrderStateReturned {
+			log.Printf("Order %d is already processing cancel/return", order.ID)
+			o.updateStockAgg.AddOrder(*order)
+		}
+		// Update Status
 		order.Status = nextStatus
 		err = o.orderRepo.Update(ctx, order)
 		if err != nil {
 			log.Printf(err.Error(), "while saving order")
 			return nil, err
 		}
+
 		return order, nil
 	}
 }
@@ -616,7 +628,6 @@ func (o *orderService) ReBuy(ctx context.Context, orderId uint, userId uint) (*d
 	if err != nil {
 		return nil, err
 	}
-	log.Print(order.OrderItems, " ////////123")
 
 	create, err := o.Create(ctx, OrderToCreateOrderInput(order))
 	if err != nil {
@@ -641,10 +652,10 @@ func OrderToCreateOrderInput(order *models.Order) dto.CreateOrderInput {
 
 	return dto.CreateOrderInput{
 		UserID:          order.UserID,
-		Total:           order.Total,
+		Total:           order.PaymentInfos[0].Total,
 		PaymentMethod:   order.PaymentMethod,
 		ShippingAddress: order.ShippingAddress,
-		ShippingFee:     order.ShippingFee,
+		ShippingFee:     order.PaymentInfos[0].ShippingFee,
 		PhoneNumber:     order.PhoneNumber,
 		OrderItems:      items,
 	}
@@ -652,51 +663,28 @@ func OrderToCreateOrderInput(order *models.Order) dto.CreateOrderInput {
 
 func (o *orderService) MapOrderToCreateOrderResponse(ctx context.Context, order *models.Order) (*dto.CreateOrderResponse, error) {
 	var orderItems []dto.OrderItemResponse
-	var missingIDs []uint
-	for _, item := range order.OrderItems {
-		_, err := o.productVariantCache.GetProductVariantHash(item.ProductVariantID)
-		if err == redis.Nil {
-			missingIDs = append(missingIDs, item.ProductVariantID)
-		}
-	}
-	variants, err := o.productVariantRepo.GetByIDSForRedisCache(ctx, missingIDs)
-	if err != nil {
-		return nil, err
-	}
 
-	for _, pv := range variants {
-		// save as hash: id, quantity, price, image,productName, productId
-		if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
-			log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
-		}
-	}
 	for _, item := range order.OrderItems {
-		hash, err := o.productVariantCache.GetProductVariantHash(item.ProductVariantID)
-		if err != nil && !errors.Is(err, redis.Nil) {
-			log.Printf("warning: Get productVariant %d from redis failed: %v", item.ProductVariantID, err)
-			return nil, err
-		}
 		orderItems = append(orderItems, dto.OrderItemResponse{
-			ID:                  item.ID,
-			OrderID:             item.OrderID,
-			OrderType:           item.OrderType,
-			ProductVariantID:    item.ProductVariantID,
-			Quantity:            item.Quantity,
-			Price:               item.Price,
-			TotalPrice:          item.TotalPrice,
-			ProductName:         hash["productName"],
-			ProductVariantImage: hash["image"],
+			ID:               item.ID,
+			OrderID:          item.OrderID,
+			OrderType:        item.OrderType,
+			ProductVariantID: item.ProductVariantID,
+			Quantity:         item.Quantity,
+			Price:            item.Price,
+			TotalPrice:       item.TotalPrice,
 		})
 	}
 
 	var paymentInfo dto.PaymentInfoResponse
-	if order.PaymentInfo != nil {
+	if len(order.PaymentInfos) > 0 {
 		paymentInfo = dto.PaymentInfoResponse{
-			ID:                 order.PaymentInfo.ID,
-			Amount:             order.PaymentInfo.Amount,
-			Status:             order.PaymentInfo.Status,
-			PaymentLink:        order.PaymentInfo.PaymentLink,
-			CancellationReason: order.PaymentInfo.CancellationReason,
+			ID:                 order.PaymentInfos[0].ID,
+			Total:              order.PaymentInfos[0].Total,
+			ShippingFee:        order.PaymentInfos[0].ShippingFee,
+			Status:             order.PaymentInfos[0].Status,
+			PaymentLink:        order.PaymentInfos[0].PaymentLink,
+			CancellationReason: order.PaymentInfos[0].CancellationReason,
 		}
 	}
 
@@ -704,10 +692,8 @@ func (o *orderService) MapOrderToCreateOrderResponse(ctx context.Context, order 
 		ID:              order.ID,
 		UserID:          order.UserID,
 		Status:          string(order.Status),
-		Total:           order.Total,
 		PaymentMethod:   string(order.PaymentMethod),
 		ShippingAddress: order.ShippingAddress,
-		ShippingFee:     order.ShippingFee,
 		PhoneNumber:     order.PhoneNumber,
 		PaymentInfo:     paymentInfo,
 		OrderItems:      orderItems,
@@ -723,51 +709,28 @@ func (o *orderService) MapOrderToCreateOrderResponse(ctx context.Context, order 
 
 func (o *orderService) MapDraftOrderToCreateOrderResponse(ctx context.Context, order *models.DraftOrder) (*dto.CreateOrderResponse, error) {
 	var orderItems []dto.OrderItemResponse
-	var missingIDs []uint
-	for _, item := range order.OrderItems {
-		_, err := o.productVariantCache.GetProductVariantHash(item.ProductVariantID)
-		if err == redis.Nil {
-			missingIDs = append(missingIDs, item.ProductVariantID)
-		}
-	}
-	variants, err := o.productVariantRepo.GetByIDSForRedisCache(ctx, missingIDs)
-	if err != nil {
-		return nil, err
-	}
 
-	for _, pv := range variants {
-		// save as hash: id, quantity, price, image,productName, productId
-		if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
-			log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
-		}
-	}
 	for _, item := range order.OrderItems {
-		hash, err := o.productVariantCache.GetProductVariantHash(item.ProductVariantID)
-		if err != nil && !errors.Is(err, redis.Nil) {
-			log.Printf("warning: Get productVariant %d from redis failed: %v", item.ProductVariantID, err)
-			return nil, err
-		}
 		orderItems = append(orderItems, dto.OrderItemResponse{
-			ID:                  item.ID,
-			OrderID:             item.OrderID,
-			OrderType:           item.OrderType,
-			ProductVariantID:    item.ProductVariantID,
-			Quantity:            item.Quantity,
-			Price:               item.Price,
-			TotalPrice:          item.TotalPrice,
-			ProductName:         hash["productName"],
-			ProductVariantImage: hash["image"],
+			ID:               item.ID,
+			OrderID:          item.OrderID,
+			OrderType:        item.OrderType,
+			ProductVariantID: item.ProductVariantID,
+			Quantity:         item.Quantity,
+			Price:            item.Price,
+			TotalPrice:       item.TotalPrice,
 		})
 	}
 
 	var paymentInfo dto.PaymentInfoResponse
-	if order.PaymentInfo != nil {
+	if len(order.PaymentInfos) > 0 {
 		paymentInfo = dto.PaymentInfoResponse{
-			ID:                 order.PaymentInfo.ID,
-			Amount:             order.PaymentInfo.Amount,
-			Status:             order.PaymentInfo.Status,
-			PaymentLink:        order.PaymentInfo.PaymentLink,
-			CancellationReason: order.PaymentInfo.CancellationReason,
+			ID:                 order.PaymentInfos[0].ID,
+			Total:              order.PaymentInfos[0].Total,
+			ShippingFee:        order.PaymentInfos[0].ShippingFee,
+			Status:             order.PaymentInfos[0].Status,
+			PaymentLink:        order.PaymentInfos[0].PaymentLink,
+			CancellationReason: order.PaymentInfos[0].CancellationReason,
 		}
 	}
 
@@ -775,10 +738,8 @@ func (o *orderService) MapDraftOrderToCreateOrderResponse(ctx context.Context, o
 		ID:              order.ID,
 		UserID:          order.UserID,
 		Status:          string(order.Status),
-		Total:           order.Total,
 		PaymentMethod:   string(order.PaymentMethod),
 		ShippingAddress: order.ShippingAddress,
-		ShippingFee:     order.ShippingFee,
 		PhoneNumber:     order.PhoneNumber,
 		PaymentInfo:     paymentInfo,
 		OrderItems:      orderItems,
@@ -810,4 +771,163 @@ func (o *orderService) ListByUserId(ctx context.Context, userID uint) ([]*dto.Cr
 		return nil, err
 	}
 	return o.MapOrdersToCreateOrderResponses(ctx, orders)
+}
+
+func (o *orderService) loadAndCacheProductVariants(ctx context.Context, ids []uint) ([]models.ProductVariant, error) {
+	// Get List from Db
+	variants, err := o.productVariantRepo.GetByIDSForRedisCache(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	// If DB returns fewer records, return ITEM_NOT_FOUND error for missing ids
+	if len(variants) != len(ids) {
+		found := map[uint]bool{}
+		for _, v := range variants {
+			found[v.ID] = true
+		}
+		for _, id := range ids {
+			if !found[id] {
+				return nil, customErr.NewError(
+					customErr.ITEM_NOT_FOUND,
+					fmt.Sprintf("Product variant not found: %d", id),
+					http.StatusBadRequest, nil,
+				)
+			}
+		}
+	}
+
+	// Save Redis cache
+	for _, pv := range variants {
+		if err := o.productVariantCache.SaveProductVariantHash(pv); err != nil {
+			log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
+		}
+	}
+
+	return variants, nil
+}
+
+func (s *orderService) CreateOrderWithDb(ctx context.Context, input dto.CreateOrderInput) (models.DraftOrder, []models.OrderItem, error) {
+	var createdDraftOrder models.DraftOrder
+	var createdItems []models.OrderItem
+
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. Lock tất cả variants liên quan
+		var variantIDs []uint
+		for _, item := range input.OrderItems {
+			variantIDs = append(variantIDs, item.ProductVariantID)
+		}
+
+		var variants []models.ProductVariant
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id IN ?", variantIDs).
+			Find(&variants).Error; err != nil {
+			return err
+		}
+		// Map quantity and productVariant ID
+		orderQtyMap := make(map[uint]uint)
+		for _, item := range input.OrderItems {
+			orderQtyMap[item.ProductVariantID] = item.Quantity
+		}
+		var total float64
+		// Calc price exclude ship
+		for _, variant := range variants {
+			qty := orderQtyMap[variant.ID]
+			total += variant.Price * float64(qty)
+		}
+		if total != input.Total-input.ShippingFee {
+			return customErr.NewError(customErr.INVALID_PRICE, "Invalid total price", http.StatusBadRequest, nil)
+		}
+		// 2. Get ReservedQty
+		type ReservedQty struct {
+			ProductVariantID uint
+			TotalQuantity    uint
+		}
+		var reservedList1 []ReservedQty
+		var reservedList2 []ReservedQty
+
+		if err := tx.Table("order_items oi").
+			Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
+			Joins("INNER JOIN draft_orders do ON do.id = oi.order_id").
+			Where("oi.product_variant_id IN ? AND oi.order_type = ?", variantIDs, "draft_order").
+			Group("oi.product_variant_id").
+			Scan(&reservedList1).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Table("order_items oi").
+			Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
+			Joins("INNER JOIN draft_orders do ON do.to_order = oi.order_id").
+			Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order !=0 AND do.to_order IS NOT NULL", variantIDs, "order").
+			Group("oi.product_variant_id").
+			Scan(&reservedList2).Error; err != nil {
+			return err
+		}
+		reservedMap := make(map[uint]uint)
+		for _, r := range reservedList1 {
+			reservedMap[r.ProductVariantID] += r.TotalQuantity
+		}
+		for _, r := range reservedList2 {
+			reservedMap[r.ProductVariantID] += r.TotalQuantity
+		}
+		// 3. Map Variant for checking stock
+		variantMap := make(map[uint]models.ProductVariant)
+		for _, v := range variants {
+			variantMap[v.ID] = v
+		}
+
+		// 4. Validate stock
+		for _, item := range input.OrderItems {
+			pv, ok := variantMap[item.ProductVariantID]
+			if !ok {
+				return fmt.Errorf("variant %d not found", item.ProductVariantID)
+			}
+			available := pv.Quantity - reservedMap[item.ProductVariantID]
+			if item.Quantity > available {
+				return fmt.Errorf("variant %d out of stock: requested %d, available %d",
+					item.ProductVariantID, item.Quantity, available)
+			}
+		}
+
+		// 5. Create  draft_order
+		createdDraftOrder = models.DraftOrder{
+			UserID:          input.UserID,
+			PaymentMethod:   input.PaymentMethod,
+			Status:          models.OrderStatePending,
+			ShippingAddress: input.ShippingAddress,
+			PhoneNumber:     input.PhoneNumber,
+		}
+		if err := tx.Create(&createdDraftOrder).Error; err != nil {
+			return err
+		}
+
+		// 6. Creqte order_items
+		for _, item := range input.OrderItems {
+			newItem := models.OrderItem{
+				OrderID:          createdDraftOrder.ID,
+				OrderType:        "draft_order",
+				ProductVariantID: item.ProductVariantID,
+				Quantity:         item.Quantity,
+				Price:            item.Price,
+				TotalPrice:       float64(item.Quantity) * item.Price,
+			}
+			createdItems = append(createdItems, newItem)
+		}
+
+		if err := tx.Create(&createdItems).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return models.DraftOrder{}, nil, err
+	}
+
+	return createdDraftOrder, createdItems, nil
+}
+
+func GeneratePaymentInfoID() int64 {
+	node := configs.GetSnowflakeNode()
+	return node.Generate().Int64() / 1000
 }

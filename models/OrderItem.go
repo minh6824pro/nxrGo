@@ -20,7 +20,7 @@ const (
 type OrderItem struct {
 	ID               uint           `gorm:"primaryKey" json:"id"`
 	OrderID          uint           `gorm:"not null" json:"order_id"`
-	OrderType        OrderType      `gorm:"not null" json:"order_type"` // polymorphic type
+	OrderType        OrderType      `gorm:"type:varchar(20);not null" json:"order_type"`
 	ProductVariantID uint           `gorm:"not null" json:"product_variant_id"`
 	Variant          ProductVariant `gorm:"foreignKey:ProductVariantID" json:"-"`
 	Quantity         uint           `json:"quantity"`

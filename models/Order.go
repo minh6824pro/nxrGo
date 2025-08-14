@@ -1,6 +1,8 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 type OrderStatus string
 
@@ -10,10 +12,12 @@ const (
 	OrderStateProcessing      OrderStatus = "PROCESSING"
 	OrderStateShipped         OrderStatus = "SHIPPED"
 	OrderStateDelivered       OrderStatus = "DELIVERED"
-	OrderStateCancelled       OrderStatus = "CANCELLED"
+	OrderStateDone            OrderStatus = "DONE"
 	OrderStateReturnRequested OrderStatus = "RETURN_REQUESTED"
+	OrderStateReturnShipping  OrderStatus = "RETURN_SHIPPING"
 	OrderStateReturned        OrderStatus = "RETURNED"
 	OrderStateRefunded        OrderStatus = "REFUNDED"
+	OrderStateCancelled       OrderStatus = "CANCELLED"
 )
 
 type PaymentMethod string
@@ -24,20 +28,39 @@ const (
 )
 
 type Order struct {
-	ID              uint          `gorm:"primaryKey" json:"id"`
-	UserID          uint          `gorm:"not null" json:"user_id"`
+	ID              uint          `gorm:"primaryKey" json:"id"`    //
+	UserID          uint          `gorm:"not null" json:"user_id"` //
 	User            User          `gorm:"references:UserID" json:"-"`
-	Status          OrderStatus   `gorm:"type:varchar(20)" json:"status"`
-	Total           float64       `gorm:"type:decimal(10,2)" json:"total"`
+	Status          OrderStatus   `gorm:"type:varchar(20)" json:"status"` //
 	PaymentMethod   PaymentMethod `gorm:"type:varchar(20)" json:"payment_method"`
 	ShippingAddress string        `gorm:"type:varchar(255)" json:"shipping_address"`
-	ShippingFee     float64       `gorm:"type:decimal(10,2)" json:"shipping_fee"`
 	PhoneNumber     string        `gorm:"type:varchar(10)" json:"phone_number"`
-	PaymentInfoID   *uint         `json:"-"`
-	PaymentInfo     *PaymentInfo  `gorm:"foreignKey:PaymentInfoID" json:"payment_info,omitempty"`
-
-	OrderItems []OrderItem `gorm:"polymorphic:Order;polymorphicValue:order" json:"order_items,omitempty"`
+	PaymentInfos    []PaymentInfo `gorm:"polymorphic:Order;polymorphicValue:order" json:"payment_infos,omitempty"`
+	OrderItems      []OrderItem   `gorm:"polymorphic:Order;polymorphicValue:order" json:"order_items,omitempty"`
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+var orderStatusOrder = map[OrderStatus]int{
+	OrderStatePending:         1,
+	OrderStateConfirmed:       2,
+	OrderStateProcessing:      3,
+	OrderStateShipped:         4,
+	OrderStateDelivered:       5,
+	OrderStateReturnRequested: 6,
+	OrderStateReturnShipping:  7,
+	OrderStateReturned:        8,
+	OrderStateRefunded:        9,
+	OrderStateCancelled:       10,
+}
+
+func IsBeforeOrderStatus(s1, s2 OrderStatus) bool {
+	order1, ok1 := orderStatusOrder[s1]
+	order2, ok2 := orderStatusOrder[s2]
+
+	if !ok1 || !ok2 {
+		return false
+	}
+	return order1 <= order2
 }

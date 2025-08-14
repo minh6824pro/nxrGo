@@ -17,10 +17,10 @@ func RegisterPayOSRoutes(router *gin.RouterGroup, db *gorm.DB) {
 	orderRepo := repoImpl.NewOrderGormRepository(db)
 	paymentInfoRepo := repoImpl.NewPaymentInfoGormImpl(db)
 	draftOrderRepo := repoImpl.NewDraftOrderGormRepository(db)
-	productVariantCache := cache.NewProductVariantRedisService(configs.RedisClient, configs.RedisCtx)
+	productVariantCache := cache.NewProductVariantRedisService(configs.RedisClient, configs.RedisCtx, productVariantRepo)
 	eventPub := event.NewChannelEventPublisher()
-
-	orderService := serviceImpl.NewOrderService(db, productVariantRepo, orderItemRepo, orderRepo, draftOrderRepo, paymentInfoRepo, productVariantCache, eventPub)
+	updateStockAgg := event.NewUpdateStockAggregator()
+	orderService := serviceImpl.NewOrderService(db, productVariantRepo, orderItemRepo, orderRepo, draftOrderRepo, paymentInfoRepo, productVariantCache, eventPub, updateStockAgg)
 
 	controller := controllers.NewWebhookController(orderService)
 	payos := router.Group("/payos")

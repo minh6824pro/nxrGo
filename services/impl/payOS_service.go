@@ -5,18 +5,12 @@ import (
 	"time"
 )
 
-func CreatePayOSPayment(orderCode int, amount float64, items []payos.Item, description, returnUrl, cancelUrl string) (*payos.CheckoutResponseDataType, error) {
-	//payload := dto.PayOSCreatePaymentRequest{
-	//	OrderCode:   orderCode,
-	//	Amount:      amount,
-	//	Description: description,
-	//	ReturnUrl:   returnUrl,
-	//	CancelUrl:   cancelUrl,
-	//}
+func CreatePayOSPayment(orderCode int64, amount float64, items []payos.Item, description, returnUrl, cancelUrl string) (*payos.CheckoutResponseDataType, error) {
+
 	expiredAt := int(time.Now().Add(5 * time.Minute).Unix())
 
 	body := payos.CheckoutRequestType{
-		OrderCode:   int64(orderCode),
+		OrderCode:   orderCode,
 		Amount:      int(amount),
 		Items:       items,
 		Description: description,

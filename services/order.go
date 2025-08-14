@@ -10,7 +10,7 @@ import (
 type OrderService interface {
 	Create(ctx context.Context, input dto.CreateOrderInput) (*dto.CreateOrderResponse, error)
 	GetById(ctx context.Context, orderID uint, userID uint) (*models.Order, error)
-	PayOSPaymentSuccess(ctx context.Context, draftOrderID uint)
+	PayOSPaymentSuccess(ctx context.Context, paymentInfoID int64)
 	UpdateQuantity(ctx context.Context) error
 	GetsByStatus(ctx context.Context, status models.OrderStatus, userId uint) ([]*models.Order, error)
 	UpdateOrderStatus(ctx context.Context, orderId uint, status utils.OrderEvent) (*models.Order, error)

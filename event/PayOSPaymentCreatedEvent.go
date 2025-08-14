@@ -5,9 +5,10 @@ import (
 )
 
 type PayOSPaymentCreatedEvent struct {
-	DraftOrderID  uint
+	Id            int64
+	OrderID       uint
 	PaymentLink   string
-	Amount        float64
+	Total         float64
 	PaymentMethod string
 	CreatedAt     time.Time
 }

@@ -14,8 +14,10 @@ const (
 	EventProcess       OrderEvent = "process"
 	EventShip          OrderEvent = "ship"
 	EventDeliver       OrderEvent = "deliver"
+	EventDone          OrderEvent = "done"
 	EventCancel        OrderEvent = "cancel"
 	EventRequestReturn OrderEvent = "request_return"
+	EventReturnShip    OrderEvent = "return_ship"
 	EventReturn        OrderEvent = "return"
 	EventRefund        OrderEvent = "refund"
 )
@@ -39,14 +41,19 @@ var stateMachine = map[models.OrderStatus]map[OrderEvent]models.OrderStatus{
 		EventRequestReturn: models.OrderStateReturnRequested,
 	},
 	models.OrderStateDelivered: {
+		EventDone:          models.OrderStateDone,
 		EventRequestReturn: models.OrderStateReturnRequested,
 	},
 	models.OrderStateReturnRequested: {
+		EventReturnShip: models.OrderStateReturnShipping,
+	},
+	models.OrderStateReturnShipping: {
 		EventReturn: models.OrderStateReturned,
 	},
 	models.OrderStateReturned: {
 		EventRefund: models.OrderStateRefunded,
 	},
+	models.OrderStateDone: {},
 }
 
 func CanTransitionOrder(current models.OrderStatus, event OrderEvent) (models.OrderStatus, error) {

@@ -11,4 +11,6 @@ type ProductVariantRedis interface {
 	EvalLua(ctx context.Context, script string, keys []string, args ...interface{}) (interface{}, error)
 	IncrementStock(orderItems []models.OrderItem) error
 	DecrementStock(orderItems []models.OrderItem) error
+	DeleteProductVariantHash(id uint) error
+	PingRedis(ctx context.Context) error
 }

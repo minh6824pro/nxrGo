@@ -34,10 +34,10 @@ func InitRedis() {
 	// Kiểm tra kết nối Redis
 	err = RedisClient.Ping(RedisCtx).Err()
 	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
+		log.Printf("Failed to connect to Redis: %v", err)
+	} else {
+		log.Println("Connected to Redis successfully")
 	}
-
-	log.Println("Connected to Redis successfully")
 }
 
 //// Ví dụ hàm tiện ích Set với TTL

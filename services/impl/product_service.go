@@ -4,18 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/minh6824pro/nxrGO/cache"
 	"github.com/minh6824pro/nxrGO/dto"
 	customErr "github.com/minh6824pro/nxrGO/errors"
 	"github.com/minh6824pro/nxrGO/models"
+	"github.com/minh6824pro/nxrGO/models/CacheModel"
 	"github.com/minh6824pro/nxrGO/repositories"
 	"github.com/minh6824pro/nxrGO/services"
 	"gorm.io/gorm"
+	"log"
 	"net/http"
 )
 
 func NewProductService(db *gorm.DB, productRepo repositories.ProductRepository, brandRepo repositories.BrandRepository, merchanRepo repositories.MerchantRepository,
 	categoryRepo repositories.CategoryRepository, productVariantRepo repositories.ProductVariantRepository, variantOptionValueRepo repositories.VariantOptionValueRepository,
-	variantOptionRepo repositories.VariantOptionRepository) services.ProductService {
+	variantOptionRepo repositories.VariantOptionRepository, productCache cache.ProductCacheService,
+	productVariantService services.ProductVariantService) services.ProductService {
 	return &productService{
 		db:                     db,
 		productRepo:            productRepo,
@@ -25,6 +29,8 @@ func NewProductService(db *gorm.DB, productRepo repositories.ProductRepository, 
 		productVariantRepo:     productVariantRepo,
 		variantOptionValueRepo: variantOptionValueRepo,
 		variantOptionRepo:      variantOptionRepo,
+		productCacheService:    productCache,
+		productVariantService:  productVariantService,
 	}
 }
 
@@ -37,6 +43,8 @@ type productService struct {
 	productVariantRepo     repositories.ProductVariantRepository
 	variantOptionValueRepo repositories.VariantOptionValueRepository
 	variantOptionRepo      repositories.VariantOptionRepository
+	productVariantService  services.ProductVariantService
+	productCacheService    cache.ProductCacheService
 }
 
 //	func (productService *productService) Create(ctx context.Context, input dto.CreateProductInput) (*models.Product, error) {
@@ -220,16 +228,16 @@ func (productService *productService) Create(ctx context.Context, input dto.Crea
 	return &createdProduct.ID, nil
 }
 
-func (productService productService) GetByID(ctx context.Context, id uint) (*models.Product, error) {
+func (productService *productService) GetByID(ctx context.Context, id uint) (*models.Product, error) {
 	return productService.productRepo.GetByID(ctx, id)
 }
 
-func (productService productService) List(ctx context.Context) ([]models.Product, error) {
+func (productService *productService) List(ctx context.Context) ([]models.Product, error) {
 	return productService.productRepo.List(ctx)
 
 }
 
-func (productService productService) Delete(ctx context.Context, id uint) error {
+func (productService *productService) Delete(ctx context.Context, id uint) error {
 	_, err := productService.productRepo.GetByID(ctx, id)
 
 	if err != nil {
@@ -243,39 +251,39 @@ func (productService productService) Delete(ctx context.Context, id uint) error 
 
 }
 
-func (productService productService) Patch(ctx context.Context, product *models.Product) error {
+func (productService *productService) Patch(ctx context.Context, product *models.Product) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (s *productService) getOrCreateBrand(ctx context.Context, tx *gorm.DB, id *uint, name *string) (uint, error) {
+func (productService *productService) getOrCreateBrand(ctx context.Context, tx *gorm.DB, id *uint, name *string) (uint, error) {
 	if id != nil {
 		return *id, nil
 	}
 	if name == nil {
 		return 0, errors.New("brand_id or brand_name is required")
 	}
-	brand, err := s.brandRepo.GetByNameTx(ctx, tx, *name)
+	brand, err := productService.brandRepo.GetByNameTx(ctx, tx, *name)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		brand = &models.Brand{Name: *name}
-		brand, err = s.brandRepo.CreateTx(ctx, tx, brand)
+		brand, err = productService.brandRepo.CreateTx(ctx, tx, brand)
 	}
 	if err != nil {
 		return 0, err
 	}
 	return brand.ID, nil
 }
-func (s *productService) getOrCreateCategory(ctx context.Context, tx *gorm.DB, id *uint, name *string) (uint, error) {
+func (productService *productService) getOrCreateCategory(ctx context.Context, tx *gorm.DB, id *uint, name *string) (uint, error) {
 	if id != nil {
 		return *id, nil
 	}
 	if name == nil {
 		return 0, errors.New("category_id or category_name is required")
 	}
-	category, err := s.categoryRepo.GetByNameTx(ctx, tx, *name)
+	category, err := productService.categoryRepo.GetByNameTx(ctx, tx, *name)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		category = &models.Category{Name: *name}
-		category, err = s.categoryRepo.CreateTx(ctx, tx, category)
+		category, err = productService.categoryRepo.CreateTx(ctx, tx, category)
 	}
 	if err != nil {
 		return 0, err
@@ -283,7 +291,7 @@ func (s *productService) getOrCreateCategory(ctx context.Context, tx *gorm.DB, i
 	return category.ID, nil
 }
 
-func (s *productService) getOrCreateMerchant(ctx context.Context, tx *gorm.DB, id *uint, name *string) (uint, error) {
+func (productService *productService) getOrCreateMerchant(ctx context.Context, tx *gorm.DB, id *uint, name *string) (uint, error) {
 	if id != nil {
 		return *id, nil
 	}
@@ -292,13 +300,225 @@ func (s *productService) getOrCreateMerchant(ctx context.Context, tx *gorm.DB, i
 	}
 
 	// Tìm theo tên trong transaction
-	merchant, err := s.merchantRepo.GetByNameTx(ctx, tx, *name)
+	merchant, err := productService.merchantRepo.GetByNameTx(ctx, tx, *name)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		merchant = &models.Merchant{Name: *name}
-		merchant, err = s.merchantRepo.CreateTx(ctx, tx, merchant)
+		merchant, err = productService.merchantRepo.CreateTx(ctx, tx, merchant)
 	}
 	if err != nil {
 		return 0, err
 	}
 	return merchant.ID, nil
+}
+
+func (productService *productService) GetProductList(ctx context.Context, priceMin, priceMax *float64,
+	priceAsc *bool, totalBuyDesc *bool, page, pageSize int) ([]*CacheModel.ProductMiniCache, int, error) {
+	var ListProductCache []*CacheModel.ProductMiniCache
+
+	// TODO IMPL +
+	// GetDB
+	listProductFilter, total, err := productService.productRepo.GetProductListFilter(ctx, priceMin, priceMax, priceAsc, totalBuyDesc, page, pageSize)
+	log.Printf("Product list: %v", listProductFilter)
+	if err != nil {
+		return nil, 0, customErr.NewError(customErr.UNEXPECTED_ERROR, "Failed to get product list", http.StatusInternalServerError, err)
+	}
+	err = productService.productCacheService.PingRedis(ctx)
+	if err != nil {
+		ListProductCache, err = productService.GetProducInfo(ctx, listProductFilter)
+	} else {
+		ListProductCache, err = productService.GetProductCacheInfo(ctx, listProductFilter)
+	}
+	return ListProductCache, total, nil
+}
+
+func (productService *productService) GetProductCacheInfo(ctx context.Context, list []CacheModel.ListProductQueryCache) ([]*CacheModel.ProductMiniCache, error) {
+	// Get cache
+	cacheList, missingList, err := productService.productCacheService.GetProductMiniCacheBulk(ctx, list)
+	if err != nil {
+		return nil, err
+	}
+
+	// Nếu còn missing → load từ DB
+	if len(missingList) > 0 {
+		missingProducts, err := productService.GetProducInfo(ctx, missingList)
+		if err != nil {
+			return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Failed to get product list", http.StatusInternalServerError, err)
+		}
+		err = productService.productCacheService.CacheMiniProducts(ctx, missingProducts)
+		if err != nil {
+			log.Printf("Failed to cache mini products: %v", err)
+		}
+		// Map lại missingProducts theo ProductID để gán nhanh vào cacheList
+		missingMap := make(map[uint]*CacheModel.ProductMiniCache, len(missingProducts))
+		for _, p := range missingProducts {
+			missingMap[p.ID] = p
+		}
+
+		// Gán vào cacheList đúng vị trí ban đầu
+		for i, item := range list {
+			if cacheList[i] == nil {
+				if mp, ok := missingMap[item.ProductID]; ok {
+					cacheList[i] = mp
+				}
+			}
+		}
+	}
+
+	return cacheList, nil
+
+}
+
+func (productService *productService) GetProductForMiniCache(ctx context.Context, productId uint, variantId uint) (*CacheModel.ProductMiniCache, error) {
+
+	product, err := productService.productRepo.GetByIdPreloadVariant(ctx, productId)
+
+	if err != nil {
+		return nil, err
+	}
+	var varIds []uint
+	for _, v := range product.Variants {
+		varIds = append(varIds, v.ID)
+
+	}
+
+	variants, err := productService.productVariantService.CheckAndCacheProductVariants(ctx, varIds)
+	if err != nil {
+		return nil, err
+	}
+	var totalQuantity uint
+	var price float64
+	for _, variant := range variants {
+		totalQuantity += variant.Quantity
+		if variant.ID == variantId {
+			price = variant.Price
+		}
+	}
+	model := CacheModel.ProductMiniCache{
+		ID:            product.ID,
+		Name:          product.Name,
+		AverageRating: product.AverageRating,
+		NumberRating:  product.NumberRating,
+		Image:         product.Image,
+		TotalBuy:      product.TotalBuy,
+		Variants:      varIds,
+		TotalQuantity: totalQuantity,
+		Price:         price,
+	}
+
+	log.Println(model, " Getproductforminicache")
+	return &model, nil
+}
+
+//func (productService *productService) GetProducInfo(ctx context.Context, list []CacheModel.ListProductQueryCache) ([]CacheModel.ProductMiniCache, error) {
+//	ids := make([]uint, 0, len(list))
+//	for _, product := range list {
+//		ids = append(ids, product.ProductID)
+//	}
+//	// Batch query preload variants
+//	var products []models.Product
+//	if err := productService.db.WithContext(ctx).
+//		Preload("Variants").
+//		Where("id IN ?", ids).
+//		Find(&products).Error; err != nil {
+//		return nil, err
+//	}
+//	variantIds := make([]uint, 0, len(products))
+//	for _, product := range products {
+//		for _, variant := range product.Variants {
+//			variantIds = append(variantIds, variant.ID)
+//		}
+//	}
+//
+//	productVariants, err := productService.productVariantRepo.GetByIDSForRedisCache(ctx, ids)
+//	if err != nil {
+//		return nil, err
+//	}
+//	panic("implement me")
+//}
+
+func (productService *productService) GetProducInfo(
+	ctx context.Context,
+	list []CacheModel.ListProductQueryCache,
+) ([]*CacheModel.ProductMiniCache, error) {
+
+	// 1. Get IDs from list
+	ids := make([]uint, 0, len(list))
+	for _, product := range list {
+		ids = append(ids, product.ProductID)
+	}
+
+	// 2. Batch query preload variants
+	var products []models.Product
+	if err := productService.db.WithContext(ctx).
+		Preload("Variants").
+		Where("id IN ?", ids).
+		Find(&products).Error; err != nil {
+		return nil, err
+	}
+
+	// 3. Get variants
+	productVariants, err := productService.productVariantRepo.GetByIDSForRedisCache(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	// Map variantID → variant cache
+	variantMap := make(map[uint]models.ProductVariant, len(productVariants))
+	for _, v := range productVariants {
+		variantMap[v.ID] = v
+	}
+
+	// Map productID → variantID từ list (để lấy price đúng variant)
+	productVariantIDMap := make(map[uint]uint, len(list))
+	for _, item := range list {
+		productVariantIDMap[item.ProductID] = item.VariantID
+	}
+
+	// Map productID → product (để dễ lookup)
+	productMap := make(map[uint]models.Product, len(products))
+	for _, p := range products {
+		productMap[p.ID] = p
+	}
+
+	// 4. Mapping sang ProductMiniCache
+	result := make([]*CacheModel.ProductMiniCache, 0, len(list))
+	for _, item := range list {
+		prod, ok := productMap[item.ProductID]
+		if !ok {
+			continue
+		}
+
+		// Tính totalQuantity + variants list
+		var totalQuantity uint
+		variantIDs := make([]uint, 0, len(prod.Variants))
+		for _, v := range prod.Variants {
+			variantIDs = append(variantIDs, v.ID)
+			if pv, ok := variantMap[v.ID]; ok {
+				totalQuantity += pv.Quantity
+			}
+		}
+
+		// Lấy price từ variantID được chỉ định trong list
+		var price float64
+		if vID, ok := productVariantIDMap[item.ProductID]; ok {
+			if pv, ok := variantMap[vID]; ok {
+				price = pv.Price
+			}
+		}
+
+		// Append vào kết quả
+		result = append(result, &CacheModel.ProductMiniCache{
+			ID:            prod.ID,
+			Name:          prod.Name,
+			AverageRating: prod.AverageRating,
+			NumberRating:  prod.NumberRating,
+			Image:         prod.Image,
+			TotalBuy:      prod.TotalBuy,
+			TotalQuantity: totalQuantity,
+			Variants:      variantIDs,
+			Price:         price,
+		})
+	}
+
+	return result, nil
 }

@@ -2,13 +2,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/gin-gonic/gin"
+	"github.com/minh6824pro/nxrGO/cache"
 	"github.com/minh6824pro/nxrGO/configs"
 	"github.com/minh6824pro/nxrGO/database"
 	"github.com/minh6824pro/nxrGO/docs"
 	"github.com/minh6824pro/nxrGO/event"
 	"github.com/minh6824pro/nxrGO/models"
+	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
 	"github.com/minh6824pro/nxrGO/routes"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -41,11 +44,16 @@ func main() {
 
 	// Connect & auto create DB
 	database.ConnectDatabase()
-	//configs.AutoMigrate()
+	configs.AutoMigrate()
 
 	db := database.DB
 
+	// Init snowflake id
+	configs.GetSnowflakeNode()
+	// Create cache
 	configs.InitRedis()
+	productVariatRepo := repoImpl.NewProductVariantGormRepository(db)
+	productVariantCache := cache.NewProductVariantRedisService(configs.RedisClient, configs.RedisCtx, productVariatRepo)
 	//configs.InitRabbitMQ()
 	//defer configs.CloseRabbitMQ()
 	//
@@ -70,6 +78,7 @@ func main() {
 		c.Next()
 	})
 	eventPub := event.NewChannelEventPublisher()
+	updateStockAgg := event.NewUpdateStockAggregator()
 
 	api := r.Group("/api")
 
@@ -80,11 +89,11 @@ func main() {
 	routes.RegisterMerchantRoutes(api, db)
 	routes.RegisterBrandRoutes(api, db)
 	routes.RegisterCategoryRoutes(api, db)
-	routes.RegisterProductRoutes(api, db)
+	routes.RegisterProductRoutes(api, db, configs.RedisClient, updateStockAgg)
 	routes.RegisterVariantRoutes(api, db)
-	routes.RegisterOrderRoutes(api, db, eventPub)
+	orderSv := routes.RegisterOrderRoutes(api, db, productVariantCache, eventPub, updateStockAgg)
 	routes.RegisterPayOSRoutes(api, db)
-
+	routes.RegisterProductVariantRoutes(api, db, productVariantCache, updateStockAgg)
 	// setup swagger info
 	docs.SwaggerInfo.Title = "nxrGO"
 	docs.SwaggerInfo.Description = "This is an ecommerce API server"
@@ -108,6 +117,23 @@ func main() {
 		}
 	}()
 
+	// Go routine
+	go func() {
+		ticker := time.NewTicker(10 * time.Hour)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			data := updateStockAgg.Flush()
+			log.Println("Flushed:", data)
+			updateStocks(db, data, productVariantCache)
+			err := orderSv.UpdateQuantity(context.Background())
+			if err != nil {
+				return
+			}
+
+		}
+	}()
+
 	<-ready
 	fmt.Println("Server ready, init PayOS...")
 	configs.InitPayOS()
@@ -119,26 +145,53 @@ func main() {
 			log.Printf("Error processing pending draft orders: %v", err)
 		}
 	}()
+
 	select {}
 }
 
-func processPendingDraftOrders(db *gorm.DB, eventPub *event.ChannelEventPublisher) error {
-	var draftOrders []models.DraftOrder
+func updateStocks(db *gorm.DB, data map[uint]int, productVariantCache cache.ProductVariantRedis) {
+	for key, value := range data {
+		err := db.Model(&models.ProductVariant{}).
+			Where("id = ?", key).
+			UpdateColumn("quantity", gorm.Expr("quantity + ?", value)).
+			Error
+		if err != nil {
+			log.Printf("Error updating product variant: %d: %v", key, err)
+		}
+		err = productVariantCache.DeleteProductVariantHash(key)
+		if err != nil {
+			log.Printf("Error deleting product variant cache: %v", err)
+		}
+	}
+	log.Print("Update stocks successfully")
+}
 
-	err := db.Model(&models.DraftOrder{}).
-		Joins("JOIN payment_infos ON payment_infos.id = draft_orders.payment_info_id").
-		Where("draft_orders.payment_method = ? AND payment_infos.status = ?", "BANK", "PENDING").
-		Preload("PaymentInfo").
-		Find(&draftOrders).Error
+func processPendingDraftOrders(db *gorm.DB, eventPub *event.ChannelEventPublisher) error {
+	var paymentInfos []models.PaymentInfo
+
+	latestSub := db.
+		Table("payment_infos").
+		Select("order_id, MAX(created_at) as max_created_at").
+		Where("order_type = ?", "draft_order").
+		Where("status = ?", "PENDING").
+		Where("payment_link <> ?", "").
+		Group("order_id")
+
+	err := db.
+		Table("payment_infos p").
+		Joins("JOIN (?) latest ON p.order_id = latest.order_id AND p.created_at = latest.max_created_at", latestSub).
+		Scan(&paymentInfos).Error
 	if err != nil {
+		log.Printf("Error scanning pending bank payment: %v", err)
 		return err
 	}
-	for _, d := range draftOrders {
+	for _, p := range paymentInfos {
 		payOSEvent := event.PayOSPaymentCreatedEvent{
-			DraftOrderID:  d.ID,
-			PaymentLink:   d.PaymentInfo.PaymentLink,
-			Amount:        d.PaymentInfo.Amount,
-			PaymentMethod: string(d.PaymentMethod),
+			Id:            p.ID,
+			OrderID:       p.OrderID,
+			PaymentLink:   p.PaymentLink,
+			Total:         p.Total,
+			PaymentMethod: "BANK",
 			CreatedAt:     time.Now(),
 		}
 

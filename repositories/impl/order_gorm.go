@@ -54,8 +54,9 @@ func (o orderGormRepository) GetByIdAndUserId(ctx context.Context, orderID uint,
 		Where("id = ? AND user_id = ?", orderID, userID).
 		Preload("OrderItems").
 		Preload("OrderItems.Variant").
-		Preload("PaymentInfo").
-		First(&m).Error; err != nil {
+		Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at DESC")
+		}).First(&m).Error; err != nil {
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, customErr.NewError(customErr.FORBIDDEN, "Order not found", http.StatusNotFound, nil)
@@ -112,7 +113,7 @@ func (o orderGormRepository) ListByUserId(ctx context.Context, userID uint) ([]*
 
 	err := o.db.WithContext(ctx).
 		Preload("OrderItems").
-		Preload("PaymentInfo").
+		Preload("PaymentInfos").
 		Where("user_id = ?", userID).
 		Find(&orders).Error
 	if err != nil {

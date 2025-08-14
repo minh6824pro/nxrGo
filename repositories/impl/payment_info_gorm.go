@@ -38,3 +38,15 @@ func (p paymentInfoGormRepository) Save(ctx context.Context, payment *models.Pay
 	}
 	return nil
 }
+
+func (p paymentInfoGormRepository) GetByID(ctx context.Context, paymentInfoID int64) (*models.PaymentInfo, error) {
+	var pm models.PaymentInfo
+	if err := p.db.WithContext(ctx).First(&pm, paymentInfoID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Merchant not found", http.StatusBadRequest, nil)
+		}
+
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+	}
+	return &pm, nil
+}

@@ -8,5 +8,5 @@ type VariantOptionValue struct {
 
 	// Relationships
 	Variant ProductVariant `gorm:"foreignKey:VariantID;references:ID" json:"-"`
-	Option  VariantOption  `gorm:"foreignKey:OptionID;references:ID" json:"option,omitempty"`
+	Option  VariantOption  `gorm:"foreignKey:OptionID;references:ID" json:"-"`
 }

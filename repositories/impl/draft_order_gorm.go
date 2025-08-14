@@ -63,9 +63,11 @@ func (d draftOrderGormRepository) GetById(ctx context.Context, orderID uint) (*m
 
 	var m models.DraftOrder
 	if err := d.db.WithContext(ctx).
-		Where("id = ? ", orderID).
+		Where("id = ?", orderID).
 		Preload("OrderItems").
-		Preload("PaymentInfo").
+		Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at DESC")
+		}).
 		First(&m).Error; err != nil {
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -113,14 +115,14 @@ func (d draftOrderGormRepository) CleanDraft(ctx context.Context) error {
 		return err
 	}
 
-	// Sau đó xóa payment info liên quan
-	for _, draft := range drafts {
-		if err := d.db.WithContext(ctx).
-			Where("id = ?", draft.PaymentInfoID).
-			Delete(&models.PaymentInfo{}).Error; err != nil {
-			return err
-		}
-	}
+	//// Sau đó xóa payment info liên quan
+	//for _, draft := range drafts {
+	//	if err := d.db.WithContext(ctx).
+	//		Where("id = ?", draft.PaymentInfoID).
+	//		Delete(&models.PaymentInfo{}).Error; err != nil {
+	//		return err
+	//	}
+	//}
 
 	return nil
 }

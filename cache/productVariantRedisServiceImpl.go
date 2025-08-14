@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"fmt"
+	"github.com/minh6824pro/nxrGO/repositories"
 	"time"
 
 	"github.com/minh6824pro/nxrGO/models"
@@ -10,16 +11,19 @@ import (
 )
 
 type productVariantRedisService struct {
-	client *redis.Client
-	ctx    context.Context
+	client             *redis.Client
+	ctx                context.Context
+	productVariantRepo repositories.ProductVariantRepository
 }
 
 const ProductVariantKeyPattern = "productVariant:%d"
 
-func NewProductVariantRedisService(client *redis.Client, ctx context.Context) ProductVariantRedis {
+func NewProductVariantRedisService(client *redis.Client, ctx context.Context,
+	productVariantRepo repositories.ProductVariantRepository) ProductVariantRedis {
 	return &productVariantRedisService{
-		client: client,
-		ctx:    ctx,
+		client:             client,
+		ctx:                ctx,
+		productVariantRepo: productVariantRepo,
 	}
 }
 
@@ -47,6 +51,22 @@ func (r *productVariantRedisService) GetProductVariantHash(id uint) (map[string]
 	return r.client.HGetAll(r.ctx, key).Result()
 }
 
+func (r *productVariantRedisService) GetOrCreateProductVariantHash(id uint) (map[string]string, error) {
+	hash, err := r.GetProductVariantHash(id)
+	if err != nil {
+		variant, err := r.productVariantRepo.GetByIDForRedisCache(context.Background(), id)
+		if err != nil {
+			return nil, err
+		}
+		if err := r.SaveProductVariantHash(*variant); err != nil {
+			return nil, err
+		}
+		hash, err = r.GetProductVariantHash(id)
+		return hash, err
+	}
+	return hash, nil
+}
+
 func (r *productVariantRedisService) EvalLua(ctx context.Context, script string, keys []string, args ...interface{}) (interface{}, error) {
 	return r.client.Eval(ctx, script, keys, args...).Result()
 }
@@ -72,5 +92,23 @@ func (r *productVariantRedisService) IncrementStock(orderItems []models.OrderIte
 			return fmt.Errorf("failed to increment stock for key %s: %w", key, err)
 		}
 	}
+	return nil
+}
+
+func (r *productVariantRedisService) DeleteProductVariantHash(id uint) error {
+	key := fmt.Sprintf(ProductVariantKeyPattern, id)
+	return r.client.Del(context.Background(), key).Err()
+}
+
+func (r *productVariantRedisService) PingRedis(ctx context.Context) error {
+	// Set timeout riêng cho lệnh ping
+	healthCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	// Thực hiện ping
+	if err := r.client.Ping(healthCtx).Err(); err != nil {
+		return fmt.Errorf("redis ping failed: %w", err)
+	}
+
 	return nil
 }

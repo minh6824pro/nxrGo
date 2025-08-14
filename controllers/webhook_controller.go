@@ -51,6 +51,6 @@ func (pc *WebhookController) HandleWebhook(c *gin.Context) {
 	if data.Reference == "TF230204212323" {
 		return
 	}
-	pc.orderService.PayOSPaymentSuccess(c, uint(data.OrderCode))
+	pc.orderService.PayOSPaymentSuccess(c, data.OrderCode)
 	c.String(http.StatusOK, "Webhook processed successfully")
 }

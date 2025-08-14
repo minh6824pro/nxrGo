@@ -14,10 +14,8 @@ type OrderData struct {
 	ID              uint                `json:"id"`
 	UserID          uint                `json:"user_id"`
 	Status          string              `json:"status"`
-	Total           float64             `json:"total"`
 	PaymentMethod   string              `json:"payment_method"`
 	ShippingAddress string              `json:"shipping_address"`
-	ShippingFee     float64             `json:"shipping_fee"`
 	PhoneNumber     string              `json:"phone_number"`
 	PaymentInfo     PaymentInfoResponse `json:"payment_info"`
 	OrderItems      []OrderItemResponse `json:"order_items"`
@@ -26,21 +24,20 @@ type OrderData struct {
 }
 
 type PaymentInfoResponse struct {
-	ID                 uint                 `json:"id"`
-	Amount             float64              `json:"amount"`
+	ID                 int64                `json:"id"`
+	Total              float64              `json:"amount"`
+	ShippingFee        float64              `json:"shipping_fee"`
 	Status             models.PaymentStatus `json:"status"`
 	PaymentLink        string               `json:"payment_link"`
 	CancellationReason string               `json:"cancellation_reason"`
 }
 
 type OrderItemResponse struct {
-	ID                  uint             `json:"id"`
-	OrderID             uint             `json:"order_id"`
-	OrderType           models.OrderType `json:"order_type"`
-	ProductVariantID    uint             `json:"product_variant_id"`
-	Quantity            uint             `json:"quantity"`
-	Price               float64          `json:"price"`
-	TotalPrice          float64          `json:"total_price"`
-	ProductName         string           `json:"product_name"`
-	ProductVariantImage string           `json:"product_variant_image"`
+	ID               uint             `json:"id"`
+	OrderID          uint             `json:"order_id"`
+	OrderType        models.OrderType `json:"order_type"`
+	ProductVariantID uint             `json:"product_variant_id"`
+	Quantity         uint             `json:"quantity"`
+	Price            float64          `json:"price"`
+	TotalPrice       float64          `json:"total_price"`
 }

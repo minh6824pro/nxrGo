@@ -18,7 +18,7 @@ type ProductController struct {
 }
 
 func NewProductController(s services.ProductService) *ProductController {
-	return &ProductController{s}
+	return &ProductController{service: s}
 }
 
 // Create godoc
@@ -28,7 +28,7 @@ func NewProductController(s services.ProductService) *ProductController {
 // @Accept       json
 // @Produce      json
 // @Param        product  body      dto.CreateProductInput  true  "Create product request"
-// @Success      201    {object}  models.Product  "Success response with product data"
+// @Success      201    id  "Success response with product data"
 // @Router       /products [post]
 func (pc *ProductController) Create(c *gin.Context) {
 	var input dto.CreateProductInput
@@ -104,4 +104,76 @@ func (pc *ProductController) Delete(ctx *gin.Context) {
 
 	}
 	ctx.JSON(http.StatusOK, gin.H{"messaage": "deleted"})
+}
+
+func (pc *ProductController) ListProductQuery(ctx *gin.Context) {
+	// Lấy query param
+	priceMinStr := ctx.Query("priceMin") // string
+	priceMaxStr := ctx.Query("priceMax")
+	priceAscStr := ctx.Query("priceAsc")
+	filterTotalBuyStr := ctx.Query("totalBuyDesc")
+	pageStr := ctx.DefaultQuery("page", "1")
+	pageSizeStr := ctx.DefaultQuery("pageSize", "16")
+
+	// Parse float64 pointer
+	var priceMin, priceMax *float64
+	if priceMinStr != "" {
+		v, err := strconv.ParseFloat(priceMinStr, 64)
+		if err != nil {
+			ctx.JSON(400, gin.H{"error": "priceMin invalid"})
+			return
+		}
+		priceMin = &v
+	}
+	if priceMaxStr != "" {
+		v, err := strconv.ParseFloat(priceMaxStr, 64)
+		if err != nil {
+			ctx.JSON(400, gin.H{"error": "priceMax invalid"})
+			return
+		}
+		priceMax = &v
+	}
+
+	// Parse bool pointer
+	var priceAsc, filterTotalBuy *bool
+	if priceAscStr != "" {
+		v, err := strconv.ParseBool(priceAscStr)
+		if err != nil {
+			ctx.JSON(400, gin.H{"error": "priceAsc invalid"})
+			return
+		}
+		priceAsc = &v
+	}
+	if filterTotalBuyStr != "" {
+		v, err := strconv.ParseBool(filterTotalBuyStr)
+		if err != nil {
+			ctx.JSON(400, gin.H{"error": "totalBuyDesc invalid"})
+			return
+		}
+		filterTotalBuy = &v
+	}
+
+	// Parse int
+	page, err := strconv.Atoi(pageStr)
+	if err != nil {
+		ctx.JSON(400, gin.H{"error": "page invalid"})
+		return
+	}
+	pageSize, err := strconv.Atoi(pageSizeStr)
+	if err != nil {
+		ctx.JSON(400, gin.H{"error": "pageSize invalid"})
+		return
+	}
+	if priceAsc != nil && filterTotalBuy != nil {
+		customErr.WriteError(ctx, customErr.NewError(customErr.BAD_REQUEST, "Sorting is allowed only by totalBuyDesc or priceAsc", http.StatusBadRequest, err))
+		return
+	}
+	// Gọi service
+	products, total, err := pc.service.GetProductList(ctx, priceMin, priceMax, priceAsc, filterTotalBuy, page, pageSize)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(200, gin.H{"data": products, "total": total})
 }

@@ -60,7 +60,7 @@ func (o *OrderController) Create(c *gin.Context) {
 		customErr.WriteError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"message": "success", "data": createdOrder})
+	c.JSON(http.StatusCreated, createdOrder)
 }
 
 // GetById godoc

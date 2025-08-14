@@ -2,8 +2,10 @@ package services
 
 import (
 	"context"
+	"github.com/gin-gonic/gin"
 	"github.com/minh6824pro/nxrGO/dto"
 	"github.com/minh6824pro/nxrGO/models"
+	"github.com/minh6824pro/nxrGO/models/CacheModel"
 )
 
 type ProductVariantService interface {
@@ -12,4 +14,7 @@ type ProductVariantService interface {
 	List(ctx context.Context) ([]models.ProductVariant, error)
 	Delete(ctx context.Context, id uint) error
 	Patch(ctx context.Context, productVariant *models.ProductVariant) error
+	IncreaseStock(c *gin.Context, id uint, input dto.UpdateStockRequest) (*models.ProductVariant, error)
+	DecreaseStock(c *gin.Context, id uint, input dto.UpdateStockRequest) (*models.ProductVariant, error)
+	CheckAndCacheProductVariants(ctx context.Context, ids []uint) ([]CacheModel.VariantLite, error)
 }

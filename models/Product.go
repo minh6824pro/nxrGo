@@ -13,6 +13,7 @@ type Product struct {
 	BrandID       uint    `gorm:"not null" json:"brand_id"`
 	CategoryID    uint    `gorm:"not null" json:"category_id"`
 	AverageRating float64 `json:"average_rating"`
+	TotalBuy      uint    `json:"total_buy"`
 	NumberRating  float32 `gorm:"type:float" json:"number_rating"`
 	Image         string  `gorm:"type:varchar(255)" json:"image"`
 	Description   string  `gorm:"type:varchar(255)" json:"description"`
