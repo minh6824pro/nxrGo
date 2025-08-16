@@ -2,7 +2,9 @@ package impl
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"github.com/minh6824pro/nxrGO/cache"
 	"github.com/minh6824pro/nxrGO/configs"
 	"github.com/minh6824pro/nxrGO/dto"
@@ -59,7 +61,11 @@ func (o *orderService) Create(ctx context.Context, input dto.CreateOrderInput) (
 	var draftOrder models.DraftOrder
 	err := o.productVariantCache.PingRedis(ctx)
 	if err != nil {
+		log.Printf("Create with Db")
 		draftOrder, orderItems, err = o.CreateOrderWithDb(ctx, input)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 
 		var total float64 = 0
@@ -409,31 +415,44 @@ func (o *orderService) DraftOrderToOrderResponse(ctx context.Context, draftOrder
 	return order, nil
 }
 
-// TODO IMPLEMENT
+// TODO IMPLEMENT IF order is draft and order is real order ( OK)
 func (o *orderService) PayOSPaymentSuccess(ctx context.Context, paymentInfoID int64) {
 	paymentInfo, err := o.paymentInfoRepo.GetByID(ctx, paymentInfoID)
 	if err != nil {
 		log.Printf(err.Error(), "while getting draftOrder to update PayOSPayment")
 		return
 	}
-	if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPaySuccess); ok {
-		paymentInfo.Status = nextStatus
-		err = o.paymentInfoRepo.Save(ctx, paymentInfo)
+	if paymentInfo.OrderType == models.OrderTypeDraftOrder {
+
+		if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPaySuccess); ok {
+			paymentInfo.Status = nextStatus
+			err = o.paymentInfoRepo.Save(ctx, paymentInfo)
+			if err != nil {
+				log.Printf(err.Error(), "while saving payment info")
+			}
+		} else {
+			log.Printf("error 1 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
+		}
+		draftOrder, err := o.draftOrderRepo.GetById(ctx, paymentInfo.OrderID)
 		if err != nil {
-			log.Printf(err.Error(), "while saving payment info")
+			log.Printf(err.Error(), "while getting draftOrder")
+			return
+		}
+		_, err = o.DraftOrderToOrder(ctx, draftOrder, draftOrder.OrderItems)
+		if err != nil {
+			log.Printf(err.Error(), "while create Order to update PayOSPayment")
+			return
 		}
 	} else {
-		log.Printf("error 1 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
-	}
-	draftOrder, err := o.draftOrderRepo.GetById(ctx, paymentInfo.OrderID)
-	if err != nil {
-		log.Printf(err.Error(), "while getting draftOrder")
-		return
-	}
-	_, err = o.DraftOrderToOrder(ctx, draftOrder, draftOrder.OrderItems)
-	if err != nil {
-		log.Printf(err.Error(), "while create Order to update PayOSPayment")
-		return
+		if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPaySuccess); ok {
+			paymentInfo.Status = nextStatus
+			err = o.paymentInfoRepo.Save(ctx, paymentInfo)
+			if err != nil {
+				log.Printf(err.Error(), "while saving payment info")
+			}
+		} else {
+			log.Printf("error 1 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
+		}
 	}
 }
 
@@ -461,6 +480,7 @@ func MapOrderItemsToPayOSItems(orderItem []models.OrderItem, shippingFee int) []
 	return items
 }
 
+// TODO REVIEW
 func (o *orderService) registerEventHandlers() {
 	o.eventBus.Subscribe(func(e event.PayOSPaymentCreatedEvent) {
 		log.Printf("Tracking payment created for order %d: %s", e.Id, e.PaymentLink)
@@ -483,13 +503,17 @@ func (o *orderService) registerEventHandlers() {
 		if data.Status == "PAID" {
 			o.PayOSPaymentSuccess(context.Background(), e.Id)
 		} else {
-			o.PayOSPaymentCancelled(context.Background(), e.Id, data.Status)
+			reasonStr := "Cancelled/Expired via payos"
+			if data.CancellationReason != nil {
+				reasonStr = *data.CancellationReason
+			}
+			o.PayOSPaymentCancelled(context.Background(), e.Id, data.Status, reasonStr)
 		}
 		log.Printf("Payment status updated and no longer pending for order %d", e.Id)
 	})
 }
 
-func (o *orderService) PayOSPaymentCancelled(ctx context.Context, paymentInfoId int64, status string) {
+func (o *orderService) PayOSPaymentCancelled(ctx context.Context, paymentInfoId int64, status string, reason string) {
 	paymentInfo, err := o.paymentInfoRepo.GetByID(ctx, paymentInfoId)
 	if err != nil {
 		log.Printf(err.Error(), "while getting draftOrder to update PayOSPayment")
@@ -497,29 +521,69 @@ func (o *orderService) PayOSPaymentCancelled(ctx context.Context, paymentInfoId 
 	}
 	val := uint(0)
 
-	draftOrder, err := o.draftOrderRepo.GetById(ctx, paymentInfo.OrderID)
-	draftOrder.ToOrderID = &val
-	if err := o.draftOrderRepo.Save(ctx, draftOrder); err != nil {
-		log.Printf(err.Error(), "while saving draft order to update PayOSPayment Fail")
-	}
-	orderItems := draftOrder.OrderItems
-
-	err = o.productVariantCache.IncrementStock(orderItems)
-	if err != nil {
-		log.Printf(err.Error(), "while incrementing stock variant after cancelled payment")
-	}
-
-	if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPayCancel); ok {
-		paymentInfo.Status = nextStatus
-		paymentInfo.CancellationReason = "Webhook"
-		now := time.Now()
-		paymentInfo.CancellationAt = &now
-		err = o.paymentInfoRepo.Save(ctx, paymentInfo)
+	// TODO IMPLEMENT IF ordertype is order
+	if paymentInfo.OrderType == models.OrderTypeDraftOrder {
+		draftOrder, err := o.draftOrderRepo.GetById(ctx, paymentInfo.OrderID)
 		if err != nil {
-			log.Printf(err.Error(), "while saving payment info")
+			log.Printf(err.Error(), "while getting draftOrder")
+			return
+		}
+		if draftOrder.PaymentInfos[0].ID == paymentInfoId && draftOrder.ToOrderID == nil {
+
+			log.Println("la payment moi nhat nen xu ly cancelled")
+			draftOrder.ToOrderID = &val
+			if err := o.draftOrderRepo.Save(ctx, draftOrder); err != nil {
+				log.Printf(err.Error(), "while saving draft order to update PayOSPayment Fail")
+			}
+			orderItems := draftOrder.OrderItems
+
+			err = o.productVariantCache.IncrementStock(orderItems)
+			if err != nil {
+				log.Printf(err.Error(), "while incrementing stock variant after cancelled payment")
+			}
+		}
+		if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPayCancel); ok {
+			paymentInfo.Status = nextStatus
+			paymentInfo.CancellationReason = reason
+			now := time.Now()
+			paymentInfo.CancellationAt = &now
+			err = o.paymentInfoRepo.Save(ctx, paymentInfo)
+			if err != nil {
+				log.Printf(err.Error(), "while saving payment info")
+			}
+		} else {
+			log.Printf("error 2 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
 		}
 	} else {
-		log.Printf("error 2 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
+		order, err2 := o.orderRepo.GetById(ctx, paymentInfo.OrderID)
+		if err2 != nil {
+			log.Printf(err.Error(), "while getting Order to update PayOSPayment")
+			return
+		}
+		if order.PaymentInfos[0].ID == paymentInfoId {
+			log.Println("la payment moi nhat nen xu ly cancelled 2")
+			//TODO
+			// Cancel order
+			if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPayCancel); ok {
+				paymentInfo.Status = nextStatus
+				paymentInfo.CancellationReason = reason
+				now := time.Now()
+				paymentInfo.CancellationAt = &now
+				err = o.paymentInfoRepo.Save(ctx, paymentInfo)
+
+				if nextOrderStatus, ok := utils.CanTransitionOrder(order.Status, utils.EventCancel); ok == nil {
+					order.Status = nextOrderStatus
+					err = o.orderRepo.Save(ctx, order)
+				}
+				// publish cancel event -> add stock
+				o.updateStockAgg.AddOrder(*order)
+				if err != nil {
+					log.Printf(err.Error(), "while saving payment info")
+				}
+			} else {
+				log.Printf("error 2 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
+			}
+		}
 	}
 }
 
@@ -765,12 +829,150 @@ func (o *orderService) MapOrdersToCreateOrderResponses(ctx context.Context, orde
 	return responses, nil
 }
 
-func (o *orderService) ListByUserId(ctx context.Context, userID uint) ([]*dto.CreateOrderResponse, error) {
+func (o *orderService) MapDraftOrdersToListOrderDataResponses(ctx context.Context, orders []*models.DraftOrder) ([]*dto.OrderData, error) {
+
+	var responses []*dto.OrderData
+	for _, order := range orders {
+		resp, err := o.MapDraftOrderToListOrderDataResponse(ctx, order)
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, resp)
+	}
+	return responses, nil
+}
+func (o *orderService) MapOrdersToListOrderDataResponses(ctx context.Context, orders []*models.Order) ([]*dto.OrderData, error) {
+
+	var responses []*dto.OrderData
+	for _, order := range orders {
+		resp, err := o.MapOrderToListOrderDataResponse(ctx, order)
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, resp)
+	}
+	return responses, nil
+}
+
+func (o *orderService) MapOrderToListOrderDataResponse(ctx context.Context, order *models.Order) (*dto.OrderData, error) {
+	var orderItems []dto.OrderItemResponse
+
+	for _, item := range order.OrderItems {
+		productString := item.Variant.Product.Name
+		for _, opt := range item.Variant.OptionValues {
+			productString = productString + " " + opt.Value
+		}
+		orderItems = append(orderItems, dto.OrderItemResponse{
+			ID:               item.ID,
+			OrderID:          item.OrderID,
+			OrderType:        item.OrderType,
+			ProductVariantID: item.ProductVariantID,
+			Quantity:         item.Quantity,
+			Price:            item.Price,
+			TotalPrice:       item.TotalPrice,
+			ProductName:      productString,
+		})
+	}
+
+	var paymentInfo dto.PaymentInfoResponse
+	if len(order.PaymentInfos) > 0 {
+		paymentInfo = dto.PaymentInfoResponse{
+			ID:                 order.PaymentInfos[0].ID,
+			Total:              order.PaymentInfos[0].Total,
+			ShippingFee:        order.PaymentInfos[0].ShippingFee,
+			Status:             order.PaymentInfos[0].Status,
+			PaymentLink:        order.PaymentInfos[0].PaymentLink,
+			CancellationReason: order.PaymentInfos[0].CancellationReason,
+		}
+	}
+
+	data := &dto.OrderData{
+		ID:              order.ID,
+		UserID:          order.UserID,
+		Status:          string(order.Status),
+		PaymentMethod:   string(order.PaymentMethod),
+		ShippingAddress: order.ShippingAddress,
+		PhoneNumber:     order.PhoneNumber,
+		PaymentInfo:     paymentInfo,
+		OrderItems:      orderItems,
+		CreatedAt:       order.CreatedAt,
+		UpdatedAt:       order.UpdatedAt,
+		OrderType:       models.OrderTypeOrder,
+	}
+
+	return data, nil
+}
+
+func (o *orderService) MapDraftOrderToListOrderDataResponse(ctx context.Context, order *models.DraftOrder) (*dto.OrderData, error) {
+	var orderItems []dto.OrderItemResponse
+
+	for _, item := range order.OrderItems {
+		productString := item.Variant.Product.Name
+		for _, opt := range item.Variant.OptionValues {
+			productString = productString + " " + opt.Value
+		}
+		orderItems = append(orderItems, dto.OrderItemResponse{
+			ID:               item.ID,
+			OrderID:          item.OrderID,
+			OrderType:        item.OrderType,
+			ProductVariantID: item.ProductVariantID,
+			Quantity:         item.Quantity,
+			Price:            item.Price,
+			TotalPrice:       item.TotalPrice,
+			ProductName:      productString,
+		})
+	}
+
+	var paymentInfo dto.PaymentInfoResponse
+	if len(order.PaymentInfos) > 0 {
+		paymentInfo = dto.PaymentInfoResponse{
+			ID:                 order.PaymentInfos[0].ID,
+			Total:              order.PaymentInfos[0].Total,
+			ShippingFee:        order.PaymentInfos[0].ShippingFee,
+			Status:             order.PaymentInfos[0].Status,
+			PaymentLink:        order.PaymentInfos[0].PaymentLink,
+			CancellationReason: order.PaymentInfos[0].CancellationReason,
+		}
+	}
+
+	data := &dto.OrderData{
+		ID:              order.ID,
+		UserID:          order.UserID,
+		Status:          string(order.Status),
+		PaymentMethod:   string(order.PaymentMethod),
+		ShippingAddress: order.ShippingAddress,
+		PhoneNumber:     order.PhoneNumber,
+		PaymentInfo:     paymentInfo,
+		OrderItems:      orderItems,
+		CreatedAt:       order.CreatedAt,
+		UpdatedAt:       order.UpdatedAt,
+		OrderType:       models.OrderTypeDraftOrder,
+	}
+
+	return data, nil
+}
+
+func (o *orderService) ListByUserId(ctx context.Context, userID uint) ([]*dto.OrderData, error) {
+	var results []*dto.OrderData
 	orders, err := o.orderRepo.ListByUserId(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	return o.MapOrdersToCreateOrderResponses(ctx, orders)
+	drafts, err := o.draftOrderRepo.ListByUserIdToOrderNull(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	orderRs, err := o.MapOrdersToListOrderDataResponses(ctx, orders)
+	if err != nil {
+		return nil, err
+	}
+	draftRs, err := o.MapDraftOrdersToListOrderDataResponses(ctx, drafts)
+	if err != nil {
+		return nil, err
+	}
+	results = append(results, orderRs...)
+	results = append(results, draftRs...)
+	return results, nil
 }
 
 func (o *orderService) loadAndCacheProductVariants(ctx context.Context, ids []uint) ([]models.ProductVariant, error) {
@@ -848,7 +1050,7 @@ func (s *orderService) CreateOrderWithDb(ctx context.Context, input dto.CreateOr
 		if err := tx.Table("order_items oi").
 			Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
 			Joins("INNER JOIN draft_orders do ON do.id = oi.order_id").
-			Where("oi.product_variant_id IN ? AND oi.order_type = ?", variantIDs, "draft_order").
+			Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order IS NULL", variantIDs, "draft_order").
 			Group("oi.product_variant_id").
 			Scan(&reservedList1).Error; err != nil {
 			return err
@@ -862,6 +1064,7 @@ func (s *orderService) CreateOrderWithDb(ctx context.Context, input dto.CreateOr
 			Scan(&reservedList2).Error; err != nil {
 			return err
 		}
+
 		reservedMap := make(map[uint]uint)
 		for _, r := range reservedList1 {
 			reservedMap[r.ProductVariantID] += r.TotalQuantity
@@ -869,6 +1072,8 @@ func (s *orderService) CreateOrderWithDb(ctx context.Context, input dto.CreateOr
 		for _, r := range reservedList2 {
 			reservedMap[r.ProductVariantID] += r.TotalQuantity
 		}
+
+		log.Println(reservedMap)
 		// 3. Map Variant for checking stock
 		variantMap := make(map[uint]models.ProductVariant)
 		for _, v := range variants {
@@ -900,7 +1105,7 @@ func (s *orderService) CreateOrderWithDb(ctx context.Context, input dto.CreateOr
 			return err
 		}
 
-		// 6. Creqte order_items
+		// 6. Create order_items
 		for _, item := range input.OrderItems {
 			newItem := models.OrderItem{
 				OrderID:          createdDraftOrder.ID,
@@ -930,4 +1135,183 @@ func (s *orderService) CreateOrderWithDb(ctx context.Context, input dto.CreateOr
 func GeneratePaymentInfoID() int64 {
 	node := configs.GetSnowflakeNode()
 	return node.Generate().Int64() / 1000
+}
+
+func (o *orderService) ChangePaymentMethod(c *gin.Context, paymentChange dto.ChangePaymentMethodRequest, userID uint) (*models.Order, error) {
+	//TODO implement me
+	payment, order, draft, err := o.paymentInfoRepo.GetByIdAndUserIdAndOrderId(c, paymentChange.PaymentID, userID, paymentChange.OrderId)
+	if err != nil {
+		return nil, err
+	}
+
+	if payment.OrderType == models.OrderTypeDraftOrder {
+		//TODO IMPLEMENT FOR DRAFT => 100% change to cod
+		// Check status if ok
+		if draft.ID == 0 {
+			return nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Cant find order", http.StatusBadRequest, err)
+		}
+		if paymentChange.PaymentMethod == models.PaymentMethodBank {
+			return nil, customErr.NewError(customErr.BAD_REQUEST, "Cant change payment method from BANK to BANK", http.StatusBadRequest, errors.New("Cant change BANK to BANK method"))
+		}
+		if draft.ToOrderID != nil {
+			return nil, customErr.NewError(customErr.BAD_REQUEST, "Can't change this order payment method", http.StatusBadRequest, err)
+		}
+		// Change to COD
+		orderUpdated, err := o.ChangeToCODPaymentFromDraft(c, draft, payment.Total, payment.ShippingFee)
+		if err != nil {
+			return orderUpdated, err
+		}
+		// Delete paymentlink
+		cancelReason := "Change payment method"
+		_, err = payos.CancelPaymentLink(strconv.FormatInt(payment.ID, 10), &cancelReason)
+		if err != nil {
+			log.Println("Payment id: ", payment.ID, " cant cancel payment payos", err)
+		}
+		return orderUpdated, nil
+	} else {
+		//TODO IMPLEMENT ORDER change
+		if order.ID == 0 {
+			return nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Cant find order", http.StatusBadRequest, err)
+		}
+		if order.PaymentMethod == paymentChange.PaymentMethod {
+			return nil, customErr.NewError(customErr.BAD_REQUEST, fmt.Sprintf("Cant change payment method from %s to %s", order.PaymentMethod, paymentChange.PaymentMethod), http.StatusBadRequest, nil)
+		}
+		if paymentChange.PaymentMethod == models.PaymentMethodCOD {
+			updatedOrder, err2 := o.ChangeToCODPaymentFromOrder(c, order, payment.Total, payment.ShippingFee)
+			if err2 != nil {
+				return nil, err2
+			}
+			cancelReason := "Change payment method"
+			_, err = payos.CancelPaymentLink(strconv.FormatInt(payment.ID, 10), &cancelReason)
+			if err != nil {
+				log.Println("Payment id: ", payment.ID, " cant cancel payment payos", err)
+			}
+			return updatedOrder, nil
+		} else if paymentChange.PaymentMethod == models.PaymentMethodBank {
+			updatedOrder, err := o.ChangeToBankPaymentFromOrder(c, order, payment.Total, payment.ShippingFee)
+			if err != nil {
+				return nil, err
+			}
+			return updatedOrder, nil
+		}
+	}
+	return order, nil
+}
+
+func (o *orderService) ChangeToCODPaymentFromDraft(c *gin.Context, draft *models.DraftOrder, total float64, shippingFee float64) (*models.Order, error) {
+
+	order := &models.Order{
+		UserID:          draft.UserID,
+		Status:          models.OrderStatePending,
+		PaymentMethod:   models.PaymentMethodCOD,
+		ShippingAddress: draft.ShippingAddress,
+		PhoneNumber:     draft.PhoneNumber,
+	}
+	if err := o.orderRepo.Create(c, order); err != nil {
+		return nil, err
+	}
+
+	var paymentInfo = &models.PaymentInfo{
+		ID:          GeneratePaymentInfoID(),
+		Total:       total,
+		ShippingFee: shippingFee,
+		OrderID:     order.ID,
+		OrderType:   models.OrderTypeOrder,
+		Status:      models.PaymentPending,
+	}
+	if err := o.paymentInfoRepo.Create(c, paymentInfo); err != nil {
+		log.Printf(err.Error(), "while creating payment info")
+		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "CreatePayment error", http.StatusInternalServerError, err)
+	}
+	for _, oi := range draft.OrderItems {
+		oi.OrderID = order.ID
+		oi.OrderType = models.OrderTypeOrder
+		if err := o.orderItemRepo.Save(c, &oi); err != nil {
+			log.Printf(err.Error(), "while saving order item")
+		}
+	}
+	order.OrderItems = draft.OrderItems
+
+	draft.OrderItems = nil
+	draft.ToOrderID = &order.ID
+	if err := o.draftOrderRepo.Save(c, draft); err != nil {
+		log.Printf(err.Error(), "while saving draft")
+	}
+	order.PaymentInfos = nil
+	order.PaymentInfos = append(order.PaymentInfos, *paymentInfo)
+	return order, nil
+}
+
+func (o *orderService) ChangeToCODPaymentFromOrder(c *gin.Context, order *models.Order, total float64, shippingFee float64) (*models.Order, error) {
+
+	order.PaymentMethod = models.PaymentMethodCOD
+
+	if err := o.orderRepo.Save(c, order); err != nil {
+		return nil, err
+	}
+
+	var paymentInfo = &models.PaymentInfo{
+		ID:          GeneratePaymentInfoID(),
+		Total:       total,
+		ShippingFee: shippingFee,
+		OrderID:     order.ID,
+		OrderType:   models.OrderTypeOrder,
+		Status:      models.PaymentPending,
+	}
+	if err := o.paymentInfoRepo.Create(c, paymentInfo); err != nil {
+		log.Printf(err.Error(), "while creating payment info")
+		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "CreatePayment error", http.StatusInternalServerError, err)
+	}
+	order.PaymentInfos = nil
+	order.PaymentInfos = append(order.PaymentInfos, *paymentInfo)
+	return order, nil
+}
+
+func (o *orderService) ChangeToBankPaymentFromOrder(c *gin.Context, order *models.Order, total float64, shippingFee float64) (*models.Order, error) {
+
+	order.PaymentMethod = models.PaymentMethodBank
+	var paymentInfo = &models.PaymentInfo{
+		ID:          GeneratePaymentInfoID(),
+		Total:       total,
+		ShippingFee: shippingFee,
+		OrderID:     order.ID,
+		OrderType:   models.OrderTypeOrder,
+		Status:      models.PaymentPending,
+	}
+
+	err := o.orderRepo.Save(c, order)
+	if err != nil {
+		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Change order payment error", http.StatusInternalServerError, err)
+	}
+	bankPayment, err := CreatePayOSPayment(paymentInfo.ID, paymentInfo.Total, MapOrderItemsToPayOSItems(order.OrderItems, int(paymentInfo.ShippingFee)), "Thanh toan don hang", "localhost:5173", "localhost:5173")
+	if err != nil {
+		log.Printf(err.Error(), "while creating payment info")
+		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "CreatePayment error", http.StatusInternalServerError, err)
+	}
+
+	// Publish event after create payOS link
+	paymentEvent := event.PayOSPaymentCreatedEvent{
+		Id:            paymentInfo.ID,
+		OrderID:       order.ID,
+		PaymentLink:   bankPayment.CheckoutUrl,
+		Total:         10000,
+		PaymentMethod: string(order.PaymentMethod),
+		CreatedAt:     time.Now(),
+	}
+
+	if err := o.eventBus.PublishPaymentCreated(paymentEvent); err != nil {
+		log.Printf("Failed to publish payment created event: %v", err)
+	}
+	log.Printf("PayOs payment created for order %d: %s", order.ID, bankPayment.CheckoutUrl)
+
+	// Save payment link & return
+	paymentInfo.PaymentLink = bankPayment.CheckoutUrl
+
+	if err := o.paymentInfoRepo.Create(c, paymentInfo); err != nil {
+		log.Printf(err.Error(), "while creating payment info")
+		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "CreatePayment error", http.StatusInternalServerError, err)
+	}
+	order.PaymentInfos = nil
+	order.PaymentInfos = append(order.PaymentInfos, *paymentInfo)
+	return order, nil
 }

@@ -50,7 +50,7 @@ func (a *AuthController) Register(c *gin.Context) {
 
 	resp, err := a.authService.Register(req)
 	if err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		customErr.WriteError(c, err)
 		return
 	}
 

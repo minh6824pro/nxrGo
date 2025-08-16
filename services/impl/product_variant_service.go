@@ -110,7 +110,7 @@ func (p productVariantService) IncreaseStock(c *gin.Context, id uint, input dto.
 		// Remove cache
 		err = p.productVariantCache.DeleteProductVariantHash(id)
 		if err != nil {
-			return nil, err
+			log.Println("Cache 1", err)
 		}
 	} else {
 		return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Unexpected error 3", http.StatusInternalServerError, nil)
@@ -189,39 +189,45 @@ func (p productVariantService) DecreaseStock(c *gin.Context, id uint, input dto.
 
 }
 
-//func (p productVariantService) loadAndCacheProductVariants(ctx context.Context, ids []uint) ([]models.ProductVariant, error) {
-//	// Get List from Db
-//	variants, err := p.productVariantRepo.GetByIDSForRedisCache(ctx, ids)
-//	if err != nil {
-//		return nil, err
-//	}
-//	// If DB returns fewer records, return ITEM_NOT_FOUND error for missing ids
-//	if len(variants) != len(ids) {
-//		found := map[uint]bool{}
-//		for _, v := range variants {
-//			found[v.ID] = true
+//	func (p productVariantService) loadAndCacheProductVariants(ctx context.Context, ids []uint) ([]models.ProductVariant, error) {
+//		// Get List from Db
+//		variants, err := p.productVariantRepo.GetByIDSForRedisCache(ctx, ids)
+//		if err != nil {
+//			return nil, err
 //		}
-//		for _, id := range ids {
-//			if !found[id] {
-//				return nil, customErr.NewError(
-//					customErr.ITEM_NOT_FOUND,
-//					fmt.Sprintf("Product variant not found: %d", id),
-//					http.StatusBadRequest, nil,
-//				)
+//		// If DB returns fewer records, return ITEM_NOT_FOUND error for missing ids
+//		if len(variants) != len(ids) {
+//			found := map[uint]bool{}
+//			for _, v := range variants {
+//				found[v.ID] = true
+//			}
+//			for _, id := range ids {
+//				if !found[id] {
+//					return nil, customErr.NewError(
+//						customErr.ITEM_NOT_FOUND,
+//						fmt.Sprintf("Product variant not found: %d", id),
+//						http.StatusBadRequest, nil,
+//					)
+//				}
 //			}
 //		}
-//	}
 //
-//	// Save Redis cache
-//	for _, pv := range variants {
-//		if err := p.productVariantCache.SaveProductVariantHash(pv); err != nil {
-//			log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
+//		// Save Redis cache
+//		for _, pv := range variants {
+//			if err := p.productVariantCache.SaveProductVariantHash(pv); err != nil {
+//				log.Printf("warning: save productVariant %d to redis failed: %v", pv.ID, err)
+//			}
 //		}
-//	}
 //
-//	return variants, nil
-//}
-
+//		return variants, nil
+//	}
+func (p productVariantService) ListByIds(ctx context.Context, list dto.ListProductVariantIds) ([]dto.VariantCartInfoResponse, error) {
+	productsVariant, err := p.productVariantRepo.ListByIds(ctx, list)
+	if err != nil {
+		return nil, err
+	}
+	return MapToVariantCartResponse(ctx, productsVariant)
+}
 func (p productVariantService) CheckAndCacheProductVariants(ctx context.Context, ids []uint) ([]CacheModel.VariantLite, error) {
 
 	var result []CacheModel.VariantLite
@@ -295,5 +301,31 @@ func (p productVariantService) CheckAndCacheProductVariants(ctx context.Context,
 		})
 	}
 
+	return result, nil
+}
+
+func MapToVariantCartResponse(ctx context.Context, list []models.ProductVariant) ([]dto.VariantCartInfoResponse, error) {
+	var result []dto.VariantCartInfoResponse
+	for _, productVariant := range list {
+		optStr := ""
+		for i, opt := range productVariant.OptionValues {
+			if i != len(productVariant.OptionValues)-1 {
+				optStr += opt.Option.Name + ": " + opt.Value + ", "
+
+			} else {
+				optStr += opt.Option.Name + ": " + opt.Value
+			}
+		}
+		cartInfo := dto.VariantCartInfoResponse{
+			ID:          productVariant.ID,
+			Price:       productVariant.Price,
+			Quantity:    productVariant.Quantity,
+			ProductName: productVariant.Product.Name,
+			ProductID:   productVariant.Product.ID,
+			Option:      optStr,
+			Image:       productVariant.Image,
+		}
+		result = append(result, cartInfo)
+	}
 	return result, nil
 }

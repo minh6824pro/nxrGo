@@ -18,4 +18,5 @@ type ProductRepository interface {
 	ListWithPagination(ctx context.Context, page int, size int) ([]models.Product, int64, int64, error)
 	GetAllProductId(ctx context.Context) ([]uint, error)
 	GetProductListFilter(ctx context.Context, priceMin, priceMax *float64, priceAsc *bool, totalBuyDescStr *bool, page, pageSize int) ([]CacheModel.ListProductQueryCache, int, error)
+	GetProductListFilterOptimized(ctx context.Context, priceMin, priceMax *float64, priceAsc *bool, totalBuyDescStr *bool, page, pageSize int) ([]CacheModel.ListProductQueryCache, int, error)
 }

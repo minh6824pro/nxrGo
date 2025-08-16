@@ -9,6 +9,7 @@ import (
 	"github.com/minh6824pro/nxrGO/services"
 	"github.com/minh6824pro/nxrGO/utils"
 	"gorm.io/gorm"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -106,13 +107,27 @@ func (pc *ProductController) Delete(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"messaage": "deleted"})
 }
 
+// ListProductQuery godoc
+// @Summary      Get landing page products with query options
+// @Description  Retrieve a paginated list of products for landing page with optional filters and sorting.
+// @Tags         products
+// @Accept       json
+// @Produce      json
+// @Param        priceMin       query     number  false  "Minimum price filter (float64)"  example(10000)
+// @Param        priceMax       query     number  false  "Maximum price filter (float64)"  example(500000)
+// @Param        priceAsc       query     bool    false  "Sort by price ascending"         example(true)
+// @Param        totalBuyDesc   query     bool    false  "Sort by total purchases descending" example(true)
+// @Param        page           query     int     false  "Page number (starts from 0)"     example(0)
+// @Param        pageSize       query     int     false  "Number of items per page"        example(16)
+// @Success      200            {array}  CacheModel.ProductMiniCache "Success response with products and total count"
+// @Router       /products/query [post]
 func (pc *ProductController) ListProductQuery(ctx *gin.Context) {
 	// Lấy query param
 	priceMinStr := ctx.Query("priceMin") // string
 	priceMaxStr := ctx.Query("priceMax")
 	priceAscStr := ctx.Query("priceAsc")
 	filterTotalBuyStr := ctx.Query("totalBuyDesc")
-	pageStr := ctx.DefaultQuery("page", "1")
+	pageStr := ctx.DefaultQuery("page", "0")
 	pageSizeStr := ctx.DefaultQuery("pageSize", "16")
 
 	// Parse float64 pointer
@@ -172,6 +187,34 @@ func (pc *ProductController) ListProductQuery(ctx *gin.Context) {
 	products, total, err := pc.service.GetProductList(ctx, priceMin, priceMax, priceAsc, filterTotalBuy, page, pageSize)
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": err.Error()})
+		log.Println(err)
+		return
+	}
+
+	ctx.JSON(200, gin.H{"data": products, "total": total})
+}
+
+func (pc *ProductController) ListProductManagement(ctx *gin.Context) {
+
+	pageStr := ctx.DefaultQuery("page", "0")
+	pageSizeStr := ctx.DefaultQuery("pageSize", "16")
+
+	// Parse int
+	page, err := strconv.Atoi(pageStr)
+	if err != nil {
+		ctx.JSON(400, gin.H{"error": "page invalid"})
+		return
+	}
+	pageSize, err := strconv.Atoi(pageSizeStr)
+	if err != nil {
+		ctx.JSON(400, gin.H{"error": "pageSize invalid"})
+		return
+	}
+
+	products, total, err := pc.service.GetProductListManagement(ctx, nil, nil, nil, nil, page, pageSize)
+	if err != nil {
+		ctx.JSON(500, gin.H{"error": err.Error()})
+		log.Println(err)
 		return
 	}
 

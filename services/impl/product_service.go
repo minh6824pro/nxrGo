@@ -317,6 +317,26 @@ func (productService *productService) GetProductList(ctx context.Context, priceM
 
 	// TODO IMPL +
 	// GetDB
+	listProductFilter, total, err := productService.productRepo.GetProductListFilterOptimized(ctx, priceMin, priceMax, priceAsc, totalBuyDesc, page, pageSize)
+	log.Printf("Product list: %v", listProductFilter)
+	if err != nil {
+		return nil, 0, customErr.NewError(customErr.UNEXPECTED_ERROR, "Failed to get product list", http.StatusInternalServerError, err)
+	}
+	err = productService.productCacheService.PingRedis(ctx)
+	if err != nil {
+		ListProductCache, err = productService.GetProductInfo(ctx, listProductFilter)
+	} else {
+		ListProductCache, err = productService.GetProductCacheInfo(ctx, listProductFilter)
+	}
+	return ListProductCache, total, nil
+}
+
+func (productService *productService) GetProductListManagement(ctx context.Context, priceMin, priceMax *float64,
+	priceAsc *bool, totalBuyDesc *bool, page, pageSize int) ([]*CacheModel.ProductMiniCache, int, error) {
+	var ListProductCache []*CacheModel.ProductMiniCache
+
+	// TODO IMPL +
+	// GetDB
 	listProductFilter, total, err := productService.productRepo.GetProductListFilter(ctx, priceMin, priceMax, priceAsc, totalBuyDesc, page, pageSize)
 	log.Printf("Product list: %v", listProductFilter)
 	if err != nil {
@@ -324,7 +344,7 @@ func (productService *productService) GetProductList(ctx context.Context, priceM
 	}
 	err = productService.productCacheService.PingRedis(ctx)
 	if err != nil {
-		ListProductCache, err = productService.GetProducInfo(ctx, listProductFilter)
+		ListProductCache, err = productService.GetProductInfo(ctx, listProductFilter)
 	} else {
 		ListProductCache, err = productService.GetProductCacheInfo(ctx, listProductFilter)
 	}
@@ -340,7 +360,7 @@ func (productService *productService) GetProductCacheInfo(ctx context.Context, l
 
 	// Nếu còn missing → load từ DB
 	if len(missingList) > 0 {
-		missingProducts, err := productService.GetProducInfo(ctx, missingList)
+		missingProducts, err := productService.GetProductInfo(ctx, missingList)
 		if err != nil {
 			return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Failed to get product list", http.StatusInternalServerError, err)
 		}
@@ -400,7 +420,6 @@ func (productService *productService) GetProductForMiniCache(ctx context.Context
 		NumberRating:  product.NumberRating,
 		Image:         product.Image,
 		TotalBuy:      product.TotalBuy,
-		Variants:      varIds,
 		TotalQuantity: totalQuantity,
 		Price:         price,
 	}
@@ -409,42 +428,41 @@ func (productService *productService) GetProductForMiniCache(ctx context.Context
 	return &model, nil
 }
 
-//func (productService *productService) GetProducInfo(ctx context.Context, list []CacheModel.ListProductQueryCache) ([]CacheModel.ProductMiniCache, error) {
-//	ids := make([]uint, 0, len(list))
-//	for _, product := range list {
-//		ids = append(ids, product.ProductID)
-//	}
-//	// Batch query preload variants
-//	var products []models.Product
-//	if err := productService.db.WithContext(ctx).
-//		Preload("Variants").
-//		Where("id IN ?", ids).
-//		Find(&products).Error; err != nil {
-//		return nil, err
-//	}
-//	variantIds := make([]uint, 0, len(products))
-//	for _, product := range products {
-//		for _, variant := range product.Variants {
-//			variantIds = append(variantIds, variant.ID)
+//	func (productService *productService) GetProducInfo(ctx context.Context, list []CacheModel.ListProductQueryCache) ([]CacheModel.ProductMiniCache, error) {
+//		ids := make([]uint, 0, len(list))
+//		for _, product := range list {
+//			ids = append(ids, product.ProductID)
 //		}
-//	}
+//		// Batch query preload variants
+//		var products []models.Product
+//		if err := productService.db.WithContext(ctx).
+//			Preload("Variants").
+//			Where("id IN ?", ids).
+//			Find(&products).Error; err != nil {
+//			return nil, err
+//		}
+//		variantIds := make([]uint, 0, len(products))
+//		for _, product := range products {
+//			for _, variant := range product.Variants {
+//				variantIds = append(variantIds, variant.ID)
+//			}
+//		}
 //
-//	productVariants, err := productService.productVariantRepo.GetByIDSForRedisCache(ctx, ids)
-//	if err != nil {
-//		return nil, err
+//		productVariants, err := productService.productVariantRepo.GetByIDSForRedisCache(ctx, ids)
+//		if err != nil {
+//			return nil, err
+//		}
+//		panic("implement me")
 //	}
-//	panic("implement me")
-//}
-
-func (productService *productService) GetProducInfo(
+func (productService *productService) GetProductInfo(
 	ctx context.Context,
 	list []CacheModel.ListProductQueryCache,
 ) ([]*CacheModel.ProductMiniCache, error) {
 
-	// 1. Get IDs from list
+	// 1. Get unique product IDs from list
 	ids := make([]uint, 0, len(list))
-	for _, product := range list {
-		ids = append(ids, product.ProductID)
+	for _, item := range list {
+		ids = append(ids, item.ProductID)
 	}
 
 	// 2. Batch query preload variants
@@ -456,31 +474,37 @@ func (productService *productService) GetProducInfo(
 		return nil, err
 	}
 
-	// 3. Get variants
-	productVariants, err := productService.productVariantRepo.GetByIDSForRedisCache(ctx, ids)
+	// 3. Get product variants from repository
+	productVariants, err := productService.productVariantRepo.GetByIDSForProductMiniCache(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 
-	// Map variantID → variant cache
+	// 4. Map variantID → variant
 	variantMap := make(map[uint]models.ProductVariant, len(productVariants))
 	for _, v := range productVariants {
 		variantMap[v.ID] = v
 	}
 
-	// Map productID → variantID từ list (để lấy price đúng variant)
-	productVariantIDMap := make(map[uint]uint, len(list))
-	for _, item := range list {
-		productVariantIDMap[item.ProductID] = item.VariantID
+	// 5. Map productID → totalQuantity (tổng quantity từ productVariants)
+	productTotalQuantityMap := make(map[uint]uint)
+	for _, v := range productVariants {
+		productTotalQuantityMap[v.ProductID] += v.Quantity
 	}
 
-	// Map productID → product (để dễ lookup)
+	// 6. Map productID → product (lookup nhanh)
 	productMap := make(map[uint]models.Product, len(products))
 	for _, p := range products {
 		productMap[p.ID] = p
 	}
 
-	// 4. Mapping sang ProductMiniCache
+	// 7. Map productID → variantID từ list (để lấy price đúng variant)
+	productVariantIDMap := make(map[uint]uint, len(list))
+	for _, item := range list {
+		productVariantIDMap[item.ProductID] = item.VariantID
+	}
+
+	// 8. Mapping sang ProductMiniCache
 	result := make([]*CacheModel.ProductMiniCache, 0, len(list))
 	for _, item := range list {
 		prod, ok := productMap[item.ProductID]
@@ -488,15 +512,14 @@ func (productService *productService) GetProducInfo(
 			continue
 		}
 
-		// Tính totalQuantity + variants list
-		var totalQuantity uint
-		variantIDs := make([]uint, 0, len(prod.Variants))
+		// Lấy danh sách variantIDs
+		var variantIDs []uint
 		for _, v := range prod.Variants {
 			variantIDs = append(variantIDs, v.ID)
-			if pv, ok := variantMap[v.ID]; ok {
-				totalQuantity += pv.Quantity
-			}
 		}
+
+		// Lấy totalQuantity từ map đã tổng hợp
+		totalQuantity := productTotalQuantityMap[prod.ID]
 
 		// Lấy price từ variantID được chỉ định trong list
 		var price float64
@@ -515,7 +538,6 @@ func (productService *productService) GetProducInfo(
 			Image:         prod.Image,
 			TotalBuy:      prod.TotalBuy,
 			TotalQuantity: totalQuantity,
-			Variants:      variantIDs,
 			Price:         price,
 		})
 	}

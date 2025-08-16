@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/minh6824pro/nxrGO/dto"
 	customErr "github.com/minh6824pro/nxrGO/errors"
 	"github.com/minh6824pro/nxrGO/models"
 	"github.com/minh6824pro/nxrGO/repositories"
@@ -11,6 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 	"log"
 	"net/http"
+	"strings"
 )
 
 type productVariantRepository struct {
@@ -92,19 +94,23 @@ func (r *productVariantRepository) CheckExistsAndQuantity(ctx context.Context, i
 	return nil
 }
 
-func (r *productVariantRepository) GetByIDSForRedisCache(ctx context.Context, ids []uint) ([]models.ProductVariant, error) {
+func (r *productVariantRepository) GetByIDSForProductMiniCache(ctx context.Context, productIds []uint) ([]models.ProductVariant, error) {
 	var variants []models.ProductVariant
-
 	// Fetch product variants from DB including associated Product data (ID, Name)
 	//    Preload is used to load the Product relationship eagerly.
 	if err := r.db.WithContext(ctx).
 		Clauses(clause.Locking{Strength: "UPDATE"}).
 		Preload("Product").
-		Where("id IN ?", ids).
+		Where("product_id IN ?", productIds).
 		Find(&variants).Error; err != nil {
 		return nil, err
 	}
 
+	// Get product varaint ids
+	var productVariantIDs []uint
+	for _, variant := range variants {
+		productVariantIDs = append(productVariantIDs, variant.ID)
+	}
 	// Struct to hold reserved quantity info from draft_orders
 	type ReservedQtyWithProduct struct {
 		ProductVariantID uint
@@ -119,7 +125,7 @@ func (r *productVariantRepository) GetByIDSForRedisCache(ctx context.Context, id
 		Table("order_items oi").
 		Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
 		Joins("INNER JOIN draft_orders do ON do.id = oi.order_id").
-		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order IS NULL", ids, "draft_order").
+		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order IS NULL", productVariantIDs, "draft_order").
 		Group("oi.product_variant_id").
 		Scan(&reserved1).Error; err != nil {
 		return nil, err
@@ -129,7 +135,68 @@ func (r *productVariantRepository) GetByIDSForRedisCache(ctx context.Context, id
 		Table("order_items oi").
 		Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
 		Joins("INNER JOIN draft_orders do ON do.to_order = oi.order_id").
-		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order !=0 AND do.to_order IS NOT NULL", ids, "order").
+		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order !=0 AND do.to_order IS NOT NULL", productVariantIDs, "order").
+		Group("oi.product_variant_id").
+		Scan(&reserved2).Error; err != nil {
+		return nil, err
+	}
+
+	// Build a map for quick lookup of reserved quantities by ProductVariantID
+	reservedMap := make(map[uint]uint)
+	for _, r := range reserved1 {
+		reservedMap[r.ProductVariantID] += r.TotalQuantity
+	}
+	for _, r := range reserved2 {
+		reservedMap[r.ProductVariantID] += r.TotalQuantity
+	}
+	log.Println(reservedMap)
+	// Adjust the quantity of each product variant by subtracting reserved quantity if any
+	for i, v := range variants {
+		if reservedQty, ok := reservedMap[v.ID]; ok {
+			// Subtract reserved quantity from available stock
+			variants[i].Quantity = v.Quantity - reservedQty
+		}
+	}
+
+	return variants, nil
+}
+
+func (r *productVariantRepository) GetByIDSForRedisCache(ctx context.Context, productVariantIds []uint) ([]models.ProductVariant, error) {
+	var variants []models.ProductVariant
+	// Fetch product variants from DB including associated Product data (ID, Name)
+	//    Preload is used to load the Product relationship eagerly.
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Preload("Product").
+		Where("id IN ?", productVariantIds).
+		Find(&variants).Error; err != nil {
+		return nil, err
+	}
+	// Struct to hold reserved quantity info from draft_orders
+	type ReservedQtyWithProduct struct {
+		ProductVariantID uint
+		TotalQuantity    uint
+	}
+
+	var reserved1 []ReservedQtyWithProduct
+	var reserved2 []ReservedQtyWithProduct
+
+	// Query the total reserved quantity per product variant from draft_orders
+	if err := r.db.WithContext(ctx).
+		Table("order_items oi").
+		Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
+		Joins("INNER JOIN draft_orders do ON do.id = oi.order_id").
+		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order IS NULL", productVariantIds, "draft_order").
+		Group("oi.product_variant_id").
+		Scan(&reserved1).Error; err != nil {
+		return nil, err
+	}
+
+	if err := r.db.WithContext(ctx).
+		Table("order_items oi").
+		Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
+		Joins("INNER JOIN draft_orders do ON do.to_order = oi.order_id").
+		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order !=0 AND do.to_order IS NOT NULL", productVariantIds, "order").
 		Group("oi.product_variant_id").
 		Scan(&reserved2).Error; err != nil {
 		return nil, err
@@ -267,4 +334,76 @@ func (r *productVariantRepository) CheckAndDecreaseStock(ctx context.Context, pv
 	}
 
 	return &updatedVariant, nil
+}
+
+func (r *productVariantRepository) ListByIds(ctx context.Context, list dto.ListProductVariantIds) ([]models.ProductVariant, error) {
+	productVariantIds := list.Ids
+
+	var productVariants []models.ProductVariant
+	if err := r.db.WithContext(ctx).
+		Table("product_variants").
+		Preload("Product").
+		Preload("OptionValues").
+		Preload("OptionValues.Option").
+		Where("id in ?", productVariantIds).
+		Order(fmt.Sprintf("FIELD(id, %s)", uintSliceToCSV(productVariantIds))).
+		Find(&productVariants).Error; err != nil {
+		return nil, err
+	}
+
+	// Struct to hold reserved quantity info from draft_orders
+	type ReservedQtyWithProduct struct {
+		ProductVariantID uint
+		TotalQuantity    uint
+	}
+
+	var reserved1 []ReservedQtyWithProduct
+	var reserved2 []ReservedQtyWithProduct
+
+	// Query the total reserved quantity per product variant from draft_orders
+	if err := r.db.WithContext(ctx).
+		Table("order_items oi").
+		Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
+		Joins("INNER JOIN draft_orders do ON do.id = oi.order_id").
+		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order IS NULL", productVariantIds, "draft_order").
+		Group("oi.product_variant_id").
+		Scan(&reserved1).Error; err != nil {
+		return nil, err
+	}
+
+	if err := r.db.WithContext(ctx).
+		Table("order_items oi").
+		Select("oi.product_variant_id, COALESCE(SUM(oi.quantity), 0) as total_quantity").
+		Joins("INNER JOIN draft_orders do ON do.to_order = oi.order_id").
+		Where("oi.product_variant_id IN ? AND oi.order_type = ? AND do.to_order !=0 AND do.to_order IS NOT NULL", productVariantIds, "order").
+		Group("oi.product_variant_id").
+		Scan(&reserved2).Error; err != nil {
+		return nil, err
+	}
+
+	// Build a map for quick lookup of reserved quantities by ProductVariantID
+	reservedMap := make(map[uint]uint)
+	for _, r := range reserved1 {
+		reservedMap[r.ProductVariantID] += r.TotalQuantity
+	}
+	for _, r := range reserved2 {
+		reservedMap[r.ProductVariantID] += r.TotalQuantity
+	}
+
+	for i, v := range productVariants {
+		if reservedQty, ok := reservedMap[v.ID]; ok {
+			// Subtract reserved quantity from available stock
+			productVariants[i].Quantity = v.Quantity - reservedQty
+		}
+	}
+
+	return productVariants, nil
+}
+
+func uintSliceToCSV(ids []uint) string {
+	strIds := make([]string, len(ids))
+	for i, id := range ids {
+		strIds[i] = fmt.Sprintf("%d", id)
+	}
+	return strings.Join(strIds, ",")
 }

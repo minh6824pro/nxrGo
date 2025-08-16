@@ -17,4 +17,5 @@ type ProductVariantService interface {
 	IncreaseStock(c *gin.Context, id uint, input dto.UpdateStockRequest) (*models.ProductVariant, error)
 	DecreaseStock(c *gin.Context, id uint, input dto.UpdateStockRequest) (*models.ProductVariant, error)
 	CheckAndCacheProductVariants(ctx context.Context, ids []uint) ([]CacheModel.VariantLite, error)
+	ListByIds(ctx context.Context, list dto.ListProductVariantIds) ([]dto.VariantCartInfoResponse, error)
 }

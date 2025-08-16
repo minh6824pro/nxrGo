@@ -126,3 +126,20 @@ func (d draftOrderGormRepository) CleanDraft(ctx context.Context) error {
 
 	return nil
 }
+
+func (d draftOrderGormRepository) ListByUserIdToOrderNull(ctx context.Context, userID uint) ([]*models.DraftOrder, error) {
+	var orders []*models.DraftOrder
+
+	err := d.db.WithContext(ctx).
+		Preload("OrderItems").
+		Preload("PaymentInfos").
+		Preload("OrderItems.Variant.Product").
+		Preload("OrderItems.Variant.OptionValues").
+		Where("user_id = ? AND to_order IS NULL", userID).
+		Find(&orders).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return orders, nil
+}

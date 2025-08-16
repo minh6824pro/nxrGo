@@ -67,11 +67,11 @@ func (s *authService) Register(req dto.RegisterRequest) (*dto.AuthResponse, erro
 func (s *authService) Login(req dto.LoginRequest) (*dto.AuthResponse, error) {
 	user, err := s.repo.FindByEmail(req.Email)
 	if err != nil || user.Active != uint8(1) {
-		return nil, customErr.NewError(customErr.INVALID_CREDENTIALS, "Invalid Credentials 1", http.StatusUnauthorized, nil)
+		return nil, customErr.NewError(customErr.INVALID_CREDENTIALS, "Email not exists", http.StatusUnauthorized, nil)
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		return nil, customErr.NewError(customErr.INVALID_CREDENTIALS, "Invalid Credentials 2", http.StatusUnauthorized, nil)
+		return nil, customErr.NewError(customErr.INVALID_CREDENTIALS, "Wrong password", http.StatusUnauthorized, nil)
 	}
 
 	now := time.Now()

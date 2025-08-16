@@ -14,4 +14,5 @@ type DraftOrderRepository interface {
 	Save(ctx context.Context, order *models.DraftOrder) error
 	GetsForDbUpdate(ctx context.Context) ([]models.DraftOrder, error)
 	CleanDraft(ctx context.Context) error
+	ListByUserIdToOrderNull(ctx context.Context, draftOrderID uint) ([]*models.DraftOrder, error)
 }

@@ -3,12 +3,11 @@ package impl
 import (
 	"context"
 	customErr "github.com/minh6824pro/nxrGO/errors"
-	"github.com/minh6824pro/nxrGO/models/CacheModel"
-	"net/http"
-
 	"github.com/minh6824pro/nxrGO/models"
+	"github.com/minh6824pro/nxrGO/models/CacheModel"
 	"github.com/minh6824pro/nxrGO/repositories"
 	"gorm.io/gorm"
+	"net/http"
 )
 
 type productGormRepository struct {
@@ -43,16 +42,18 @@ func (r *productGormRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, p
 }
 
 func (r *productGormRepository) GetByID(ctx context.Context, id uint) (*models.Product, error) {
+
 	var p models.Product
 	err := r.db.WithContext(ctx).
 		Preload("Brand").
 		Preload("Merchant").
 		Preload("Category").
-		Preload("Variants").
+		Preload("Variants", func(db *gorm.DB) *gorm.DB {
+			return db.Select("product_variants.id, product_variants.product_id, product_variants.price, product_variants.image, product_variants.version, get_available_quantity(product_variants.id) as quantity")
+		}).
 		Preload("Variants.OptionValues").
 		Preload("Variants.OptionValues.Option").
 		First(&p, id).Error
-
 	if err != nil {
 		return nil, err
 	}
@@ -195,5 +196,80 @@ func (r *productGormRepository) GetProductListFilter(
 	// Tính total page
 	totalPage := int((totalItem + int64(pageSize) - 1) / int64(pageSize))
 
+	return results, totalPage, nil
+}
+
+func (r *productGormRepository) GetProductListFilterOptimized(
+	ctx context.Context,
+	priceMin, priceMax *float64,
+	priceAsc *bool,
+	totalBuyDescStr *bool,
+	page, pageSize int,
+) ([]CacheModel.ListProductQueryCache, int, error) {
+
+	// subquery với ROW_NUMBER() để chọn 1 variant duy nhất cho mỗi product (order by price, id)
+	ranked := r.db.Raw(`
+  SELECT id, product_id, price, available_qty FROM (
+    SELECT
+      v.id,
+      v.product_id,
+      v.price,
+      get_available_quantity(v.id) AS available_qty,
+      ROW_NUMBER() OVER (PARTITION BY v.product_id ORDER BY v.price ASC, v.id ASC) AS rn
+    FROM product_variants v
+    WHERE get_available_quantity(v.id) > 0
+  ) t
+  WHERE t.rn = 1
+`)
+	// Filter giá min/max
+	if priceMin != nil {
+		ranked = ranked.Where("v.price >= ?", *priceMin)
+	}
+	if priceMax != nil {
+		ranked = ranked.Where("v.price <= ?", *priceMax)
+	}
+
+	// Main query
+	query := r.db.WithContext(ctx).
+		Table("products p").
+		Joins("JOIN (?) rv ON rv.product_id = p.id", ranked).
+		Where("p.deleted_at IS NULL AND p.active = 1")
+	// Count total
+	var totalItem int64
+	if err := query.Select("COUNT(DISTINCT p.id)").Count(&totalItem).Error; err != nil {
+		return nil, 0, err
+	}
+
+	// Order
+	if priceAsc != nil {
+		if *priceAsc {
+			query = query.Order("rv.price ASC")
+		} else {
+			query = query.Order("rv.price DESC")
+		}
+	} else if totalBuyDescStr != nil && *totalBuyDescStr {
+		query = query.Order("p.total_buy DESC")
+	} else {
+		query = query.Order("p.created_at DESC")
+	}
+
+	// Pagination
+	offset := page * pageSize
+	query = query.Select(`
+			p.id AS product_id,
+			rv.id AS variant_id,
+			rv.available_qty as quantity,
+			p.total_buy
+		`).
+		Limit(pageSize).
+		Offset(offset)
+
+	// Execute
+	var results []CacheModel.ListProductQueryCache
+	if err := query.Scan(&results).Error; err != nil {
+		return nil, 0, err
+	}
+
+	totalPage := int((totalItem + int64(pageSize) - 1) / int64(pageSize))
 	return results, totalPage, nil
 }

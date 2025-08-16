@@ -42,14 +42,19 @@ func (o *OrderController) Create(c *gin.Context) {
 	}
 	var input dto.CreateOrderInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		customErr.WriteError(c, customErr.NewError(
-			customErr.BAD_REQUEST,
-			"invalid request body", http.StatusBadRequest, err,
-		))
+		if errors.Is(err, io.EOF) {
+			customErr.WriteError(c, customErr.NewError(
+				customErr.BAD_REQUEST,
+				"Request body is empty",
+				http.StatusBadRequest,
+				err,
+			))
+			return
+		}
 		if utils.HandleValidationError(c, err) {
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		customErr.WriteError(c, customErr.NewError(customErr.BAD_REQUEST, "Invalid request body", http.StatusBadRequest, err))
 		return
 	}
 	input.UserID = userID.(uint)
@@ -246,4 +251,40 @@ func (o *OrderController) List(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, list)
+}
+
+func (o *OrderController) ChangePaymentMethod(c *gin.Context) {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		customErr.WriteError(c, customErr.NewError(
+			customErr.UNAUTHORIZED,
+			"Unauthorized",
+			http.StatusUnauthorized,
+			nil))
+		return
+	}
+	var payment dto.ChangePaymentMethodRequest
+	if err := c.ShouldBindJSON(&payment); err != nil {
+
+		if errors.Is(err, io.EOF) {
+			customErr.WriteError(c, customErr.NewError(
+				customErr.BAD_REQUEST,
+				"Request body is empty",
+				http.StatusBadRequest,
+				err,
+			))
+			return
+		}
+		if utils.HandleValidationError(c, err) {
+			return
+		}
+		customErr.WriteError(c, err)
+		return
+	}
+	changed, err := o.service.ChangePaymentMethod(c, payment, userID.(uint))
+	if err != nil {
+		customErr.WriteError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "success", "data": changed})
 }

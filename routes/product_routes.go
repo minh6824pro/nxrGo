@@ -34,6 +34,8 @@ func RegisterProductRoutes(rg *gin.RouterGroup, db *gorm.DB, redisClient *redis.
 		product.GET("", productController.List)
 		product.GET("/:id", productController.GetByID)
 		product.DELETE("/:id", productController.Delete)
-		product.GET("/query/", productController.ListProductQuery)
+		product.GET("/query", productController.ListProductQuery)
+		product.GET("/admin", productController.ListProductManagement)
+
 	}
 }

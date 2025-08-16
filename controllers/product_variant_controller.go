@@ -138,3 +138,41 @@ func (pc *ProductVariantController) DecreaseStock(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"data": updated})
 }
+
+// ListByIds godoc
+// @Summary		Get products for cart info
+// @Description	Get product for cart info
+// @Tags		Product Variants
+// @Accept		json
+// @Produce		json
+// @Param		ListProductVariantIds body dto.ListProductVariantIds true "List contain ids need to fetch"
+// @Success		200 {object} models.ProductVariant
+// @Router		/product_variants/listbyids [get]
+func (pc *ProductVariantController) ListByIds(c *gin.Context) {
+	var input dto.ListProductVariantIds
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+
+		if errors.Is(err, io.EOF) {
+			customErr.WriteError(c, customErr.NewError(
+				customErr.BAD_REQUEST,
+				"Request body is empty",
+				http.StatusBadRequest,
+				err,
+			))
+			return
+		}
+
+		if utils.HandleValidationError(c, err) {
+			return
+		}
+		customErr.WriteError(c, customErr.NewError(customErr.BAD_REQUEST, "Invalid request body", http.StatusBadRequest, err))
+		return
+	}
+	ids, err := pc.service.ListByIds(c, input)
+	if err != nil {
+		customErr.WriteError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": ids})
+}

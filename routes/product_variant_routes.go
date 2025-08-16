@@ -18,10 +18,10 @@ func RegisterProductVariantRoutes(rg *gin.RouterGroup, db *gorm.DB, productVaria
 
 	productVariants := rg.Group("/product_variants")
 	{
-		productVariants.POST("/", productVariantController.Create)
+		productVariants.POST("", productVariantController.Create)
 		productVariants.PATCH("/:id/increase_stock", productVariantController.IncreaseStock)
 		productVariants.PATCH("/:id/decrease_stock", productVariantController.DecreaseStock)
-
+		productVariants.POST("/listbyids", productVariantController.ListByIds)
 	}
 
 }

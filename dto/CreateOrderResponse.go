@@ -21,6 +21,7 @@ type OrderData struct {
 	OrderItems      []OrderItemResponse `json:"order_items"`
 	CreatedAt       time.Time           `json:"CreatedAt"`
 	UpdatedAt       time.Time           `json:"UpdatedAt"`
+	OrderType       models.OrderType    `json:"order_type"`
 }
 
 type PaymentInfoResponse struct {
@@ -40,4 +41,5 @@ type OrderItemResponse struct {
 	Quantity         uint             `json:"quantity"`
 	Price            float64          `json:"price"`
 	TotalPrice       float64          `json:"total_price"`
+	ProductName      string           `json:"product_name"`
 }

@@ -3,6 +3,8 @@ package impl
 import (
 	"context"
 	"errors"
+	"fmt"
+	"github.com/gin-gonic/gin"
 	"github.com/go-sql-driver/mysql"
 	customErr "github.com/minh6824pro/nxrGO/errors"
 	"github.com/minh6824pro/nxrGO/models"
@@ -49,4 +51,55 @@ func (p paymentInfoGormRepository) GetByID(ctx context.Context, paymentInfoID in
 		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
 	}
 	return &pm, nil
+}
+
+func (p paymentInfoGormRepository) GetByIdAndUserIdAndOrderId(
+	c *gin.Context,
+	paymentId int64, userId, orderId uint,
+) (models.PaymentInfo, *models.Order, *models.DraftOrder, error) {
+
+	var pm models.PaymentInfo
+	var order models.Order
+	var draft models.DraftOrder
+
+	// Get payment_info
+	if err := p.db.WithContext(c).
+		Table("payment_infos").
+		Where("id = ? AND order_id = ?", paymentId, orderId).
+		First(&pm).Error; err != nil {
+		return pm, nil, nil, err
+	}
+
+	// Get order/draft by order_type
+	switch pm.OrderType {
+	case "order":
+		if err := p.db.WithContext(c).
+			Table("orders").
+			Preload("OrderItems").
+			Where("id = ? AND user_id = ?", pm.OrderID, userId).
+			First(&order).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return pm, nil, nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Order not found", http.StatusBadRequest, nil)
+			}
+			return pm, nil, nil, err
+		}
+		return pm, &order, nil, nil
+
+	case "draft_order":
+		if err := p.db.WithContext(c).
+			Table("draft_orders").
+			Preload("OrderItems").
+			Where("id = ? AND user_id = ?", pm.OrderID, userId).
+			First(&draft).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return pm, nil, nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Order not found", http.StatusBadRequest, nil)
+			}
+
+			return pm, nil, nil, err
+		}
+		return pm, nil, &draft, nil
+
+	default:
+		return pm, nil, nil, fmt.Errorf("unknown order type: %s", pm.OrderType)
+	}
 }

@@ -59,7 +59,7 @@ func (o orderGormRepository) GetByIdAndUserId(ctx context.Context, orderID uint,
 		}).First(&m).Error; err != nil {
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, customErr.NewError(customErr.FORBIDDEN, "Order not found", http.StatusNotFound, nil)
+			return nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Order not found", http.StatusNotFound, nil)
 		}
 		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
 	}
@@ -73,7 +73,9 @@ func (o orderGormRepository) GetById(ctx context.Context, orderID uint) (*models
 	if err := o.db.WithContext(ctx).
 		Where("id = ?", orderID).
 		Preload("OrderItems").
-		First(&m).Error; err != nil {
+		Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at DESC")
+		}).First(&m).Error; err != nil {
 
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, customErr.NewError(customErr.FORBIDDEN, "Order not found", http.StatusNotFound, nil)
@@ -113,7 +115,11 @@ func (o orderGormRepository) ListByUserId(ctx context.Context, userID uint) ([]*
 
 	err := o.db.WithContext(ctx).
 		Preload("OrderItems").
-		Preload("PaymentInfos").
+		Preload("OrderItems.Variant.Product").
+		Preload("OrderItems.Variant.OptionValues").
+		Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at DESC")
+		}).
 		Where("user_id = ?", userID).
 		Find(&orders).Error
 	if err != nil {
@@ -121,4 +127,12 @@ func (o orderGormRepository) ListByUserId(ctx context.Context, userID uint) ([]*
 	}
 
 	return orders, nil
+}
+
+func (o orderGormRepository) Save(ctx context.Context, order *models.Order) error {
+	// Nếu muốn vừa insert vừa update: GORM Save() sẽ tự xử lý dựa vào PK
+	if err := o.db.WithContext(ctx).Save(order).Error; err != nil {
+		return err
+	}
+	return nil
 }

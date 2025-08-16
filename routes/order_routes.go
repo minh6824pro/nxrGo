@@ -35,6 +35,7 @@ func RegisterOrderRoutes(rg *gin.RouterGroup, db *gorm.DB, productVariantCache c
 		order.GET("/status", orderController.GetByStatus)
 		order.POST("/rebuy/:id", orderController.ReBuy)
 		order.GET("", orderController.List)
+		order.POST("/changepaymentmethod", orderController.ChangePaymentMethod)
 
 	}
 	order.Use(authMiddleware.RequireRole(models.RoleAdmin))
