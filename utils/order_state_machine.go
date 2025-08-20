@@ -19,7 +19,6 @@ const (
 	EventRequestReturn OrderEvent = "request_return"
 	EventReturnShip    OrderEvent = "return_ship"
 	EventReturn        OrderEvent = "return"
-	EventRefund        OrderEvent = "refund"
 )
 
 // StateMachine defines valid transitions
@@ -49,9 +48,6 @@ var stateMachine = map[models.OrderStatus]map[OrderEvent]models.OrderStatus{
 	},
 	models.OrderStateReturnShipping: {
 		EventReturn: models.OrderStateReturned,
-	},
-	models.OrderStateReturned: {
-		EventRefund: models.OrderStateRefunded,
 	},
 	models.OrderStateDone: {},
 }

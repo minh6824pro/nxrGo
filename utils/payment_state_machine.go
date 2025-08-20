@@ -6,16 +6,18 @@ type PaymentEvent string
 
 const (
 	EventPaySuccess PaymentEvent = "pay_success"
-	EventPayFailed  PaymentEvent = "pay_failed"
 	EventPayCancel  PaymentEvent = "pay_cancel"
+	EventRefund     PaymentEvent = "pay_refund"
 )
 
 // Payment State Machine
 var paymentStateMachine = map[models.PaymentStatus]map[PaymentEvent]models.PaymentStatus{
 	models.PaymentPending: {
 		EventPaySuccess: models.PaymentSuccess,
-		EventPayFailed:  models.PaymentFailed,
 		EventPayCancel:  models.PaymentCanceled,
+	},
+	models.PaymentSuccess: {
+		EventRefund: models.PaymentRefund,
 	},
 }
 

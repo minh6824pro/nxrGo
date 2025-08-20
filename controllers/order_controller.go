@@ -8,6 +8,7 @@ import (
 	"github.com/minh6824pro/nxrGO/services"
 	"github.com/minh6824pro/nxrGO/utils"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 )
@@ -109,6 +110,8 @@ func (o *OrderController) GetById(c *gin.Context) {
 func (o *OrderController) UpdateDb(c *gin.Context) {
 	err := o.service.UpdateQuantity(c)
 	if err != nil {
+		customErr.WriteError(c, err)
+		log.Println(err)
 		return
 	}
 	return
@@ -248,6 +251,7 @@ func (o *OrderController) List(c *gin.Context) {
 	}
 	list, err := o.service.ListByUserId(c, userID.(uint))
 	if err != nil {
+		customErr.WriteError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, list)
@@ -287,4 +291,14 @@ func (o *OrderController) ChangePaymentMethod(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "success", "data": changed})
+}
+
+func (o *OrderController) ListByAdmin(c *gin.Context) {
+	list, err := o.service.ListByAdmin(c)
+
+	if err != nil {
+		customErr.WriteError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, list)
 }

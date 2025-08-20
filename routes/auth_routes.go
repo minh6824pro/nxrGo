@@ -2,44 +2,33 @@ package routes
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/minh6824pro/nxrGO/controllers"
-	"github.com/minh6824pro/nxrGO/jwt"
-	"github.com/minh6824pro/nxrGO/middleware"
 	"github.com/minh6824pro/nxrGO/models"
-	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
-	serviceImpl "github.com/minh6824pro/nxrGO/services/impl"
-	"gorm.io/gorm"
+	"github.com/minh6824pro/nxrGO/modules"
 )
 
 //func RegisterAuthRoutes(router *gin.Engine, authController *controllers.AuthController, authMiddleware *middleware.AuthMiddleware) {
 
-func RegisterAuthRoutes(rg *gin.RouterGroup, db *gorm.DB) {
-
-	repo := repoImpl.NewAuthRepository(db)
-	jwtService := jwt.NewJWTService()
-	service := serviceImpl.NewAuthService(repo, jwtService)
-	authController := controllers.NewAuthController(service)
-	authMiddleware := middleware.NewAuthMiddleware(jwtService)
+func RegisterAuthRoutes(rg *gin.RouterGroup, authModule *modules.AuthModule) {
 
 	auth := rg.Group("/auth")
 	{
-		auth.POST("/register", authController.Register)
-		auth.POST("/login", authController.Login)
-		auth.POST("/refresh", authController.RefreshToken)
+		auth.POST("/register", authModule.AuthController.Register)
+		auth.POST("/login", authModule.AuthController.Login)
+		auth.POST("/refresh", authModule.AuthController.RefreshToken)
 	}
 
 	// Protected routes
 	protected := rg.Group("/user")
-	protected.Use(authMiddleware.RequireAuth())
+	protected.Use(authModule.AuthMiddleware.RequireAuth())
 	{
-		protected.GET("/profile", authController.GetProfile)
+		protected.GET("/profile", authModule.AuthController.GetProfile)
 
 	}
 
 	// Admin only routes
 	admin := rg.Group("/admin")
-	admin.Use(authMiddleware.RequireAuth())
-	admin.Use(authMiddleware.RequireRole(models.RoleAdmin))
+	admin.Use(authModule.AuthMiddleware.RequireAuth())
+	admin.Use(authModule.AuthMiddleware.RequireRole(models.RoleAdmin))
 	{
 		// Thêm các routes admin ở đây
 	}

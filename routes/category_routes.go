@@ -2,24 +2,18 @@ package routes
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/minh6824pro/nxrGO/controllers"
-	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
-	serviceImpl "github.com/minh6824pro/nxrGO/services/impl"
-	"gorm.io/gorm"
+	"github.com/minh6824pro/nxrGO/modules"
 )
 
-func RegisterCategoryRoutes(rg *gin.RouterGroup, db *gorm.DB) {
-	repo := repoImpl.NewCategoryGormRepository(db)
-	service := serviceImpl.NewCategoryService(repo)
-	controller := controllers.NewCategoryController(service)
+func RegisterCategoryRoutes(rg *gin.RouterGroup, categoryModule *modules.CategoryModule) {
 
 	category := rg.Group("/categories")
 	{
-		category.POST("", controller.Create)
-		category.GET("/:id", controller.GetByID)
-		category.DELETE("/:id", controller.Delete)
-		category.GET("", controller.List)
-		category.PATCH("/:id", controller.Patch)
+		category.POST("", categoryModule.Controller.Create)
+		category.GET("/:id", categoryModule.Controller.GetByID)
+		category.DELETE("/:id", categoryModule.Controller.Delete)
+		category.GET("", categoryModule.Controller.List)
+		category.PATCH("/:id", categoryModule.Controller.Patch)
 	}
 
 }

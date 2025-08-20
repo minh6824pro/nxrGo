@@ -9,8 +9,8 @@ type PaymentStatus string
 const (
 	PaymentPending  PaymentStatus = "PENDING"
 	PaymentSuccess  PaymentStatus = "SUCCESS"
-	PaymentFailed   PaymentStatus = "FAILED"
 	PaymentCanceled PaymentStatus = "CANCELED"
+	PaymentRefund   PaymentStatus = "REFUND"
 )
 
 type PaymentInfo struct {

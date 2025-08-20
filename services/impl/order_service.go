@@ -248,6 +248,13 @@ return {"OK"}
 			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Failed to reserve stock after retries", http.StatusInternalServerError, nil)
 		}
 
+		for _, oi := range input.OrderItems {
+			oi := oi
+			go func() {
+				o.productVariantCache.DeleteMiniProduct(oi.ProductVariantID)
+			}()
+		}
+
 		// Create Draft Order
 		draftOrder = models.DraftOrder{
 			UserID:          input.UserID,
@@ -521,7 +528,7 @@ func (o *orderService) PayOSPaymentCancelled(ctx context.Context, paymentInfoId 
 	}
 	val := uint(0)
 
-	// TODO IMPLEMENT IF ordertype is order
+	// TODO IMPLEMENT IF ordertype is draft order
 	if paymentInfo.OrderType == models.OrderTypeDraftOrder {
 		draftOrder, err := o.draftOrderRepo.GetById(ctx, paymentInfo.OrderID)
 		if err != nil {
@@ -561,9 +568,7 @@ func (o *orderService) PayOSPaymentCancelled(ctx context.Context, paymentInfoId 
 			return
 		}
 		if order.PaymentInfos[0].ID == paymentInfoId {
-			log.Println("la payment moi nhat nen xu ly cancelled 2")
-			//TODO
-			// Cancel order
+			// Latest payment -> cancel payment & order
 			if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPayCancel); ok {
 				paymentInfo.Status = nextStatus
 				paymentInfo.CancellationReason = reason
@@ -583,12 +588,25 @@ func (o *orderService) PayOSPaymentCancelled(ctx context.Context, paymentInfoId 
 			} else {
 				log.Printf("error 2 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
 			}
+		} else {
+			// Not latest payment info -> cancel payment
+			if nextStatus, ok := utils.CanTransitionPayment(paymentInfo.Status, utils.EventPayCancel); ok {
+				paymentInfo.Status = nextStatus
+				paymentInfo.CancellationReason = reason
+				now := time.Now()
+				paymentInfo.CancellationAt = &now
+				err = o.paymentInfoRepo.Save(ctx, paymentInfo)
+
+			} else {
+				log.Printf("error 2 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
+			}
+
 		}
 	}
 }
 
 func (o *orderService) UpdateQuantity(ctx context.Context) error {
-
+	o.updateStocks()
 	// Get draft order that are converted to  order
 	draftOrders, err := o.draftOrderRepo.GetsForDbUpdate(ctx)
 	if err != nil {
@@ -651,6 +669,24 @@ func (o *orderService) CleanDraft(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (o *orderService) updateStocks() {
+	data := o.updateStockAgg.Flush()
+	for key, value := range data {
+		err := o.db.Model(&models.ProductVariant{}).
+			Where("id = ?", key).
+			UpdateColumn("quantity", gorm.Expr("quantity + ?", value)).
+			Error
+		if err != nil {
+			log.Printf("Error updating product variant: %d: %v", key, err)
+		}
+		err = o.productVariantCache.DeleteProductVariantHash(key)
+		if err != nil {
+			log.Printf("Error deleting product variant cache: %v", err)
+		}
+	}
+	log.Print("Update stocks successfully")
 }
 
 func (o *orderService) GetsByStatus(ctx context.Context, status models.OrderStatus, userId uint) ([]*models.Order, error) {
@@ -967,6 +1003,30 @@ func (o *orderService) ListByUserId(ctx context.Context, userID uint) ([]*dto.Or
 		return nil, err
 	}
 	draftRs, err := o.MapDraftOrdersToListOrderDataResponses(ctx, drafts)
+	if err != nil {
+		return nil, err
+	}
+	results = append(results, orderRs...)
+	results = append(results, draftRs...)
+	return results, nil
+}
+
+func (o *orderService) ListByAdmin(c *gin.Context) ([]*dto.OrderData, error) {
+
+	var results []*dto.OrderData
+	orders, err := o.orderRepo.ListByAdmin(c)
+	if err != nil {
+		return nil, err
+	}
+	drafts, err := o.draftOrderRepo.ListByAdmin(c)
+	if err != nil {
+		return nil, err
+	}
+	orderRs, err := o.MapOrdersToListOrderDataResponses(c, orders)
+	if err != nil {
+		return nil, err
+	}
+	draftRs, err := o.MapDraftOrdersToListOrderDataResponses(c, drafts)
 	if err != nil {
 		return nil, err
 	}
@@ -1315,3 +1375,5 @@ func (o *orderService) ChangeToBankPaymentFromOrder(c *gin.Context, order *model
 	order.PaymentInfos = append(order.PaymentInfos, *paymentInfo)
 	return order, nil
 }
+
+//func (o *orderService) CalculateShippingFee(c *gin.Context)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/minh6824pro/nxrGO/repositories"
+	"gorm.io/gorm"
+	"log"
 	"time"
 
 	"github.com/minh6824pro/nxrGO/models"
@@ -14,21 +16,23 @@ type productVariantRedisService struct {
 	client             *redis.Client
 	ctx                context.Context
 	productVariantRepo repositories.ProductVariantRepository
+	db                 *gorm.DB
 }
 
 const ProductVariantKeyPattern = "productVariant:%d"
 
 func NewProductVariantRedisService(client *redis.Client, ctx context.Context,
-	productVariantRepo repositories.ProductVariantRepository) ProductVariantRedis {
+	productVariantRepo repositories.ProductVariantRepository, db *gorm.DB) ProductVariantRedis {
 	return &productVariantRedisService{
 		client:             client,
 		ctx:                ctx,
 		productVariantRepo: productVariantRepo,
+		db:                 db,
 	}
 }
 
 func (r *productVariantRedisService) SaveProductVariantHash(pv models.ProductVariant) error {
-	ttl := 12 * time.Hour
+	ttl := 30 * time.Minute
 	key := fmt.Sprintf(ProductVariantKeyPattern, pv.ID)
 
 	err := r.client.HSet(r.ctx, key, map[string]interface{}{
@@ -79,6 +83,7 @@ func (r *productVariantRedisService) DecrementStock(orderItems []models.OrderIte
 		if err != nil {
 			return fmt.Errorf("failed to decrement stock for key %s: %w", key, err)
 		}
+		r.DeleteMiniProduct(oi.ProductVariantID)
 	}
 	return nil
 }
@@ -91,12 +96,15 @@ func (r *productVariantRedisService) IncrementStock(orderItems []models.OrderIte
 		if err != nil {
 			return fmt.Errorf("failed to increment stock for key %s: %w", key, err)
 		}
+		r.DeleteMiniProduct(oi.ProductVariantID)
 	}
 	return nil
 }
 
 func (r *productVariantRedisService) DeleteProductVariantHash(id uint) error {
 	key := fmt.Sprintf(ProductVariantKeyPattern, id)
+
+	r.DeleteMiniProduct(id)
 	return r.client.Del(context.Background(), key).Err()
 }
 
@@ -111,4 +119,22 @@ func (r *productVariantRedisService) PingRedis(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (r *productVariantRedisService) DeleteMiniProduct(variantId uint) error {
+	var productID uint
+	err := r.db.Table("product_variants").
+		Select("product_id").
+		Where("id = ?", variantId).
+		Pluck("product_id", &productID).Error
+
+	if err != nil {
+		log.Println("CO gi do da xay ra: ", err)
+	}
+	log.Println(productID)
+
+	key := fmt.Sprintf(productMiniCacheKeyPattern, productID)
+
+	// Thực hiện xoá key
+	return r.client.Del(r.ctx, key).Err()
 }

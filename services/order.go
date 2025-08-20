@@ -18,4 +18,5 @@ type OrderService interface {
 	ReBuy(c context.Context, orderID uint, userId uint) (*dto.CreateOrderResponse, error)
 	ListByUserId(ctx context.Context, userID uint) ([]*dto.OrderData, error)
 	ChangePaymentMethod(c *gin.Context, payment dto.ChangePaymentMethodRequest, u uint) (*models.Order, error)
+	ListByAdmin(c *gin.Context) ([]*dto.OrderData, error)
 }

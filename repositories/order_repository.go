@@ -16,4 +16,5 @@ type OrderRepository interface {
 	Update(ctx context.Context, order *models.Order) error
 	GetsByStatusAndUserId(ctx context.Context, status models.OrderStatus, userId uint) ([]*models.Order, error)
 	ListByUserId(ctx context.Context, userID uint) ([]*models.Order, error)
+	ListByAdmin(ctx context.Context) ([]*models.Order, error)
 }

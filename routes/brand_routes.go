@@ -2,24 +2,17 @@ package routes
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/minh6824pro/nxrGO/controllers"
-	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
-	serviceImpl "github.com/minh6824pro/nxrGO/services/impl"
-	"gorm.io/gorm"
+	"github.com/minh6824pro/nxrGO/modules"
 )
 
-func RegisterBrandRoutes(rg *gin.RouterGroup, db *gorm.DB) {
-	// Setup Repository, Service, Controller
-	repo := repoImpl.NewBrandGormRepository(db)
-	service := serviceImpl.NewBrandService(repo)
-	controller := controllers.NewBrandController(service)
+func RegisterBrandRoutes(rg *gin.RouterGroup, brandModule *modules.BrandModule) {
 
 	brand := rg.Group("/brands")
 	{
-		brand.POST("", controller.Create)
-		brand.GET("/:id", controller.GetByID)
-		brand.DELETE("/:id", controller.Delete)
-		brand.GET("", controller.List)
-		brand.PATCH("/:id", controller.Patch)
+		brand.POST("", brandModule.Controller.Create)
+		brand.GET("/:id", brandModule.Controller.GetByID)
+		brand.DELETE("/:id", brandModule.Controller.Delete)
+		brand.GET("", brandModule.Controller.List)
+		brand.PATCH("/:id", brandModule.Controller.Patch)
 	}
 }

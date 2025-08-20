@@ -15,4 +15,5 @@ type DraftOrderRepository interface {
 	GetsForDbUpdate(ctx context.Context) ([]models.DraftOrder, error)
 	CleanDraft(ctx context.Context) error
 	ListByUserIdToOrderNull(ctx context.Context, draftOrderID uint) ([]*models.DraftOrder, error)
+	ListByAdmin(ctx context.Context) ([]*models.DraftOrder, error)
 }

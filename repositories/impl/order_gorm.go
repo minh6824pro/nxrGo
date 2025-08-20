@@ -129,6 +129,22 @@ func (o orderGormRepository) ListByUserId(ctx context.Context, userID uint) ([]*
 	return orders, nil
 }
 
+func (o orderGormRepository) ListByAdmin(ctx context.Context) ([]*models.Order, error) {
+	var orders []*models.Order
+	err := o.db.WithContext(ctx).
+		Preload("OrderItems").
+		Preload("OrderItems.Variant").
+		Preload("OrderItems.Variant.OptionValues").
+		Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at DESC")
+		}).Find(&orders).Error
+
+	if err != nil {
+		return nil, err
+	}
+	return orders, nil
+}
+
 func (o orderGormRepository) Save(ctx context.Context, order *models.Order) error {
 	// Nếu muốn vừa insert vừa update: GORM Save() sẽ tự xử lý dựa vào PK
 	if err := o.db.WithContext(ctx).Save(order).Error; err != nil {

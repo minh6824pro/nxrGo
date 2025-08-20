@@ -2,23 +2,17 @@ package routes
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/minh6824pro/nxrGO/controllers"
-	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
-	serviceImpl "github.com/minh6824pro/nxrGO/services/impl"
-	"gorm.io/gorm"
+	"github.com/minh6824pro/nxrGO/modules"
 )
 
-func RegisterMerchantRoutes(rg *gin.RouterGroup, db *gorm.DB) {
-	repo := repoImpl.NewMerchantGormRepository(db)
-	service := serviceImpl.NewMerchantService(repo)
-	controller := controllers.NewMerchantController(service)
+func RegisterMerchantRoutes(rg *gin.RouterGroup, merchantModule *modules.MerchantModule) {
 
 	merchant := rg.Group("/merchants")
 	{
-		merchant.POST("", controller.Create)
-		merchant.GET("", controller.List)
-		merchant.GET("/:id", controller.GetByID)
-		merchant.DELETE("/:id", controller.Delete)
-		merchant.PATCH("/:id", controller.Patch)
+		merchant.POST("", merchantModule.Controller.Create)
+		merchant.GET("", merchantModule.Controller.List)
+		merchant.GET("/:id", merchantModule.Controller.GetByID)
+		merchant.DELETE("/:id", merchantModule.Controller.Delete)
+		merchant.PATCH("/:id", merchantModule.Controller.Patch)
 	}
 }

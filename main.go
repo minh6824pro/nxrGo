@@ -12,8 +12,8 @@ import (
 	"github.com/minh6824pro/nxrGO/docs"
 	"github.com/minh6824pro/nxrGO/event"
 	"github.com/minh6824pro/nxrGO/models"
-	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
 	"github.com/minh6824pro/nxrGO/routes"
+	"github.com/minh6824pro/nxrGO/wire"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/gorm"
@@ -53,8 +53,11 @@ func main() {
 	configs.GetSnowflakeNode()
 	// Create cache
 	configs.InitRedis()
-	productVariatRepo := repoImpl.NewProductVariantGormRepository(db)
-	productVariantCache := cache.NewProductVariantRedisService(configs.RedisClient, configs.RedisCtx, productVariatRepo)
+
+	// Init necessary dependency
+	eventPub := event.NewChannelEventPublisher()
+	updateStockAgg := event.NewUpdateStockAggregator()
+
 	//configs.InitRabbitMQ()
 	//defer configs.CloseRabbitMQ()
 	//
@@ -75,24 +78,29 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	// Init necessary dependency
-	eventPub := event.NewChannelEventPublisher()
-	updateStockAgg := event.NewUpdateStockAggregator()
-
 	api := r.Group("/api")
 
+	auth := wire.InitAuthModule(db)
+	merchant := wire.InitMerchantModule(db)
+	brand := wire.InitBrandModule(db)
+	category := wire.InitCategoryModule(db)
+	product := wire.InitProductModule(db, configs.RedisClient, configs.RedisCtx, updateStockAgg)
+	variant := wire.InitVariantModule(db)
+	order := wire.InitOrderModule(db, configs.RedisClient, configs.RedisCtx, eventPub, updateStockAgg)
+	productVariant := wire.InitProductVariantModule(db, configs.RedisClient, configs.RedisCtx, updateStockAgg)
+	payOsModule := wire.InitPayOSModule(db, configs.RedisClient, configs.RedisCtx, eventPub, updateStockAgg)
 	// Register auth routes FIRST
-	routes.RegisterAuthRoutes(api, db)
+	routes.RegisterAuthRoutes(api, auth)
 
 	// Existing routes
-	routes.RegisterMerchantRoutes(api, db)
-	routes.RegisterBrandRoutes(api, db)
-	routes.RegisterCategoryRoutes(api, db)
-	routes.RegisterProductRoutes(api, db, configs.RedisClient, updateStockAgg)
-	routes.RegisterVariantRoutes(api, db)
-	orderSv := routes.RegisterOrderRoutes(api, db, productVariantCache, eventPub, updateStockAgg)
-	routes.RegisterPayOSRoutes(api, db)
-	routes.RegisterProductVariantRoutes(api, db, productVariantCache, updateStockAgg)
+	routes.RegisterMerchantRoutes(api, merchant)
+	routes.RegisterBrandRoutes(api, brand)
+	routes.RegisterCategoryRoutes(api, category)
+	routes.RegisterProductRoutes(api, product)
+	routes.RegisterVariantRoutes(api, variant)
+	routes.RegisterOrderRoutes(api, order)
+	routes.RegisterPayOSRoutes(api, payOsModule)
+	routes.RegisterProductVariantRoutes(api, productVariant)
 	// setup swagger info
 	docs.SwaggerInfo.Title = "nxrGO"
 	docs.SwaggerInfo.Description = "This is an ecommerce API server"
@@ -118,14 +126,14 @@ func main() {
 
 	// Go routine
 	go func() {
-		ticker := time.NewTicker(10 * time.Hour)
+		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 
 		for range ticker.C {
 			data := updateStockAgg.Flush()
 			log.Println("Flushed:", data)
-			updateStocks(db, data, productVariantCache)
-			err := orderSv.UpdateQuantity(context.Background())
+			updateStocks(db, data, order.ProductVariantRedisService)
+			err := order.Service.UpdateQuantity(context.Background())
 			if err != nil {
 				return
 			}
@@ -171,7 +179,7 @@ func processPendingDraftOrders(db *gorm.DB, eventPub *event.ChannelEventPublishe
 	latestSub := db.
 		Table("payment_infos").
 		Select("order_id, MAX(created_at) as max_created_at").
-		Where("order_type = ?", "draft_order").
+		//	Where("order_type = ?", "draft_order").
 		Where("status = ?", "PENDING").
 		Where("payment_link <> ?", "").
 		Group("order_id")

@@ -2,10 +2,15 @@ package impl
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"github.com/minh6824pro/nxrGO/dto"
 	"github.com/minh6824pro/nxrGO/models"
 	"github.com/minh6824pro/nxrGO/repositories"
 	"github.com/minh6824pro/nxrGO/services"
+	"net/http"
+	"net/url"
+	"time"
 )
 
 type merchantService struct {
@@ -17,7 +22,49 @@ func NewMerchantService(repo repositories.MerchantRepository) services.MerchantS
 }
 
 func (merchantService *merchantService) Create(ctx context.Context, m *dto.CreateMerchantInput) (*models.Merchant, error) {
-	return merchantService.repo.Create(ctx, CreateMerchantInputDtoMapper(m))
+
+	lat, long, err := GetGPSLocation(ctx, m.Location)
+	if err != nil {
+		return nil, err
+	}
+	return merchantService.repo.Create(ctx, CreateMerchantInputDtoMapper(m, lat, long))
+	// TODO GO routine change location to gps
+}
+
+func GetGPSLocation(ctx context.Context, locStr string) (string, string, error) {
+	type geocodeResult struct {
+		Lat string `json:"lat"`
+		Lon string `json:"lon"`
+	}
+	baseURL := "https://nominatim.openstreetmap.org/search"
+	q := url.QueryEscape(locStr)
+	apiURL := fmt.Sprintf("%s?q=%s&format=json&limit=1", baseURL, q)
+
+	// tạo HTTP client có timeout
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", "", err
+	}
+	// Nominatim yêu cầu User-Agent hợp lệ
+	req.Header.Set("User-Agent", "nxrGO/1.0(minhnd6824@gmail.com)")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+
+	var results []geocodeResult
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return "", "", err
+	}
+
+	if len(results) == 0 {
+		return "", "", fmt.Errorf("không tìm thấy vị trí cho: %s", locStr)
+	}
+
+	return results[0].Lat, results[0].Lon, nil
 }
 
 func (merchantService *merchantService) GetByID(ctx context.Context, id uint) (*models.Merchant, error) {
@@ -70,9 +117,12 @@ func (merchantService *merchantService) Patch(ctx context.Context, id uint, inpu
 	return existing, nil
 }
 
-func CreateMerchantInputDtoMapper(m *dto.CreateMerchantInput) *models.Merchant {
+func CreateMerchantInputDtoMapper(m *dto.CreateMerchantInput, lat, long string) *models.Merchant {
 	return &models.Merchant{
-		Name: m.Name,
+		Name:      m.Name,
+		Location:  m.Location,
+		Latitude:  lat,
+		Longitude: long,
 	}
 }
 

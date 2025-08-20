@@ -20,6 +20,7 @@ func AutoMigrate() {
 		&models.OrderItem{},
 		&models.PaymentInfo{},
 		&models.DraftOrder{},
+		&models.Delivery{},
 	)
 
 	if err != nil {

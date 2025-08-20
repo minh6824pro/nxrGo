@@ -20,7 +20,7 @@ const (
 	productMiniCacheKeyPattern = "productMiniInfo:%d"
 	ListProductCacheKeyPattern = "priceMin:%s|priceMax:%s|priceAsc:%s|totalBuyDesc:%s|page:%d|pageSize:%d"
 )
-const ttl = 12 * time.Hour
+const ttl = 1 * time.Hour
 
 // Hàm khởi tạo
 func NewProductCacheService(rdb *redis.Client, repo repositories.ProductRepository,

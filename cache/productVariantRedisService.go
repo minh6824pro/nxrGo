@@ -13,4 +13,5 @@ type ProductVariantRedis interface {
 	DecrementStock(orderItems []models.OrderItem) error
 	DeleteProductVariantHash(id uint) error
 	PingRedis(ctx context.Context) error
+	DeleteMiniProduct(variantId uint) error
 }
