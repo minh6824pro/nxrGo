@@ -57,6 +57,20 @@ func NewOrderService(db *gorm.DB, productVariantRepo repositories.ProductVariant
 }
 
 func (o *orderService) Create(ctx context.Context, input dto.CreateOrderInput) (*dto.CreateOrderResponse, error) {
+	// Validate info with signature
+	var total float64
+	for _, oi := range input.OrderItems {
+		if !utils.ValidateProductVariantSignature(oi.ProductVariantID, oi.Price, oi.MerchantID, oi.Timestamp, oi.Signature) {
+			return nil, customErr.NewError(customErr.BAD_REQUEST, "Product information invalid", http.StatusBadRequest, nil)
+		}
+		total += oi.Price * float64(oi.Quantity)
+
+	}
+	if total != input.Total-input.ShippingFee {
+		return nil, customErr.NewError(customErr.INVALID_PRICE, "Invalid total price", http.StatusBadRequest, nil)
+	}
+
+	// Begin check quantity
 	var orderItems []models.OrderItem
 	var draftOrder models.DraftOrder
 	err := o.productVariantCache.PingRedis(ctx)
@@ -72,14 +86,13 @@ func (o *orderService) Create(ctx context.Context, input dto.CreateOrderInput) (
 
 		luaScript := `
 local itemCount = tonumber(ARGV[1])
-local expectedTotal = tonumber(ARGV[2]) -- total client gửi vào
-local idx = 3
+local idx = 2
 
 -- 1) Check for MISS (missing keys)
 local missed = {}
 for i = 1, itemCount do
     local variantId = ARGV[idx]
-    idx = idx + 3
+    idx = idx + 2
     local key = KEYS[i]
     if redis.call("EXISTS", key) == 0 then
         table.insert(missed, variantId)
@@ -93,56 +106,42 @@ if #missed > 0 then
     return ret
 end
 
--- 2) Check stock, price and calculate total
-idx = 3
+-- 2) Check stock only
+idx = 2
 local updates = {}
-local totalPrice = 0
 for i = 1, itemCount do
     local variantId = ARGV[idx]
     local qtyRequested = tonumber(ARGV[idx + 1])
-    local priceExpected = tonumber(ARGV[idx + 2])
-    idx = idx + 3
+    idx = idx + 2
     local key = KEYS[i]
 
     local stock = tonumber(redis.call("HGET", key, "quantity"))
-    local price = tonumber(redis.call("HGET", key, "price"))
 
-    if stock == nil or price == nil then
+    if stock == nil then
         return {"MISS", variantId}
     end
     if qtyRequested > stock then
         return {"INSUFFICIENT", variantId}
     end
-    if priceExpected ~= price then
-        return {"INVALID_PRICE", variantId}
-    end
-
-    totalPrice = totalPrice + (price * qtyRequested)
 
     table.insert(updates, { key = key, qty = qtyRequested })
 end
 
--- 3) Check total price
-if totalPrice ~= expectedTotal then
-    return {"INVALID_TOTAL",totalPrice}
-end
-
--- 4) Deduct stock if all checks pass
+-- 3) Deduct stock if all checks pass
 for i = 1, #updates do
     redis.call("HINCRBY", updates[i].key, "quantity", -updates[i].qty)
 end
 
 return {"OK"}
-
 `
 
 		// build keys & args
 		keys := make([]string, 0, len(input.OrderItems))
-		args := []interface{}{len(input.OrderItems), input.Total - input.ShippingFee}
+		args := []interface{}{len(input.OrderItems)}
 		for _, oi := range input.OrderItems {
 			keys = append(keys, fmt.Sprintf(cache.ProductVariantKeyPattern, oi.ProductVariantID))
-			// ARGV: variantId, quantity, price (Lua uses toNumber when needed)
-			args = append(args, oi.ProductVariantID, oi.Quantity, oi.Price)
+			// ARGV: variantId, quantity
+			args = append(args, oi.ProductVariantID, oi.Quantity)
 		}
 
 		// Helper to safely convert interface{} to string
@@ -207,27 +206,6 @@ return {"OK"}
 				log.Print("Redis key miss: ", variantId)
 				return nil, customErr.NewError(customErr.INSUFFICIENT_STOCK, fmt.Sprintf("Product variant : %s Insufficient stock", variantId), http.StatusBadRequest, nil)
 
-			case "INVALID_PRICE":
-				variantId := ""
-				if len(arr) > 1 {
-					variantId = toStr(arr[1])
-				}
-				log.Print(fmt.Sprintf("Product %s invalid price: ", variantId))
-
-				return nil, customErr.NewError(customErr.INVALID_PRICE, fmt.Sprintf("Product variant: %s Price Invalid", variantId), http.StatusBadRequest, nil)
-			case "INVALID_TOTAL":
-				expectedTotal := float64(0)
-				if len(arr) > 1 {
-					expectedTotalStr := toStr(arr[1])
-					expectedTotal, err = strconv.ParseFloat(expectedTotalStr, 64)
-					if err != nil {
-						return nil, customErr.NewError(customErr.INVALID_PRICE, "Total price not match", http.StatusBadRequest, nil)
-					}
-					expectedTotal += input.ShippingFee
-				}
-				log.Print("Invalid total, expected: ", expectedTotal)
-
-				return nil, customErr.NewError(customErr.INVALID_PRICE, fmt.Sprintf("Total price not match, expected: %.2f", expectedTotal), http.StatusBadRequest, nil)
 			case "OK":
 				// all OK -> calculate total from input (price already verified)
 				for _, oi := range input.OrderItems {
@@ -248,6 +226,7 @@ return {"OK"}
 			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Failed to reserve stock after retries", http.StatusInternalServerError, nil)
 		}
 
+		// Remove cache
 		for _, oi := range input.OrderItems {
 			oi := oi
 			go func() {
@@ -737,6 +716,7 @@ func (o *orderService) ReBuy(ctx context.Context, orderId uint, userId uint) (*d
 	return create, nil
 }
 
+// TODO REVIEW
 func OrderToCreateOrderInput(order *models.Order) dto.CreateOrderInput {
 	var items []dto.CreateOrderItem
 
@@ -745,7 +725,6 @@ func OrderToCreateOrderInput(order *models.Order) dto.CreateOrderInput {
 			ProductVariantID: detail.ProductVariantID,
 			Quantity:         detail.Quantity,
 			Price:            detail.Price,
-			OrderID:          order.ID,
 		}
 		items = append(items, item)
 	}
@@ -1090,15 +1069,7 @@ func (s *orderService) CreateOrderWithDb(ctx context.Context, input dto.CreateOr
 		for _, item := range input.OrderItems {
 			orderQtyMap[item.ProductVariantID] = item.Quantity
 		}
-		var total float64
-		// Calc price exclude ship
-		for _, variant := range variants {
-			qty := orderQtyMap[variant.ID]
-			total += variant.Price * float64(qty)
-		}
-		if total != input.Total-input.ShippingFee {
-			return customErr.NewError(customErr.INVALID_PRICE, "Invalid total price", http.StatusBadRequest, nil)
-		}
+
 		// 2. Get ReservedQty
 		type ReservedQty struct {
 			ProductVariantID uint

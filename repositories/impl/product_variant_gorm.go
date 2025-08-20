@@ -343,6 +343,7 @@ func (r *productVariantRepository) ListByIds(ctx context.Context, list dto.ListP
 	if err := r.db.WithContext(ctx).
 		Table("product_variants").
 		Preload("Product").
+		Preload("Product.Merchant").
 		Preload("OptionValues").
 		Preload("OptionValues.Option").
 		Where("id in ?", productVariantIds).

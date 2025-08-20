@@ -13,10 +13,12 @@ import (
 	"github.com/minh6824pro/nxrGO/models/CacheModel"
 	"github.com/minh6824pro/nxrGO/repositories"
 	"github.com/minh6824pro/nxrGO/services"
+	"github.com/minh6824pro/nxrGO/utils"
 	"gorm.io/gorm"
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 type productVariantService struct {
@@ -316,15 +318,21 @@ func MapToVariantCartResponse(ctx context.Context, list []models.ProductVariant)
 				optStr += opt.Option.Name + ": " + opt.Value
 			}
 		}
+		// TODO CHANGE MERCHANT NAME IF CACHE
 		cartInfo := dto.VariantCartInfoResponse{
-			ID:          productVariant.ID,
-			Price:       productVariant.Price,
-			Quantity:    productVariant.Quantity,
-			ProductName: productVariant.Product.Name,
-			ProductID:   productVariant.Product.ID,
-			Option:      optStr,
-			Image:       productVariant.Image,
+			ID:           productVariant.ID,
+			Price:        productVariant.Price,
+			Quantity:     productVariant.Quantity,
+			ProductName:  productVariant.Product.Name,
+			ProductID:    productVariant.Product.ID,
+			Option:       optStr,
+			MerchantName: productVariant.Product.Merchant.Name,
+			MerchantID:   productVariant.Product.Merchant.ID,
+			Timestamp:    time.Now(),
+			Image:        productVariant.Image,
 		}
+		signature := utils.GenerateProductVariantSignature(cartInfo.ID, cartInfo.Price, cartInfo.MerchantID, cartInfo.Timestamp)
+		cartInfo.Signature = signature
 		result = append(result, cartInfo)
 	}
 	return result, nil

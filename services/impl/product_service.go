@@ -11,9 +11,11 @@ import (
 	"github.com/minh6824pro/nxrGO/models/CacheModel"
 	"github.com/minh6824pro/nxrGO/repositories"
 	"github.com/minh6824pro/nxrGO/services"
+	"github.com/minh6824pro/nxrGO/utils"
 	"gorm.io/gorm"
 	"log"
 	"net/http"
+	"time"
 )
 
 func NewProductService(db *gorm.DB, productRepo repositories.ProductRepository, brandRepo repositories.BrandRepository, merchanRepo repositories.MerchantRepository,
@@ -228,8 +230,12 @@ func (productService *productService) Create(ctx context.Context, input dto.Crea
 	return &createdProduct.ID, nil
 }
 
-func (productService *productService) GetByID(ctx context.Context, id uint) (*models.Product, error) {
-	return productService.productRepo.GetByID(ctx, id)
+func (productService *productService) GetByID(ctx context.Context, id uint) (*dto.ProductDetailResponse, error) {
+	product, err := productService.productRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return MapProductToProductDetailResponse(ctx, product)
 }
 
 func (productService *productService) List(ctx context.Context) ([]models.Product, error) {
@@ -543,4 +549,38 @@ func (productService *productService) GetProductInfo(
 	}
 
 	return result, nil
+}
+
+func MapProductToProductDetailResponse(ctx context.Context, product *models.Product) (*dto.ProductDetailResponse, error) {
+	productDetail := &dto.ProductDetailResponse{
+		ID:            product.ID,
+		Name:          product.Name,
+		AverageRating: product.AverageRating,
+		NumberRating:  product.NumberRating,
+		Image:         product.Image,
+		TotalBuy:      product.TotalBuy,
+		Description:   product.Description,
+		Active:        product.Active,
+		Merchant:      product.Merchant,
+		Brand:         product.Brand,
+		Category:      product.Category,
+	}
+	var variantDetailResponse []dto.VariantDetailResponse
+	for _, variant := range product.Variants {
+		variantResponse := dto.VariantDetailResponse{
+			ID:           variant.ID,
+			Quantity:     variant.Quantity,
+			Price:        variant.Price,
+			ProductID:    variant.ProductID,
+			Image:        variant.Image,
+			Timestamp:    time.Now(),
+			OptionValues: variant.OptionValues,
+		}
+
+		signature := utils.GenerateProductVariantSignature(variantResponse.ID, variantResponse.Price, product.Merchant.ID, variantResponse.Timestamp)
+		variantResponse.Signature = signature
+		variantDetailResponse = append(variantDetailResponse, variantResponse)
+	}
+	productDetail.Variants = variantDetailResponse
+	return productDetail, nil
 }

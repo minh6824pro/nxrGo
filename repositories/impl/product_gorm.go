@@ -58,6 +58,7 @@ func (r *productGormRepository) GetByID(ctx context.Context, id uint) (*models.P
 		return nil, err
 	}
 	return &p, nil
+
 }
 
 func (r *productGormRepository) Update(ctx context.Context, p *models.Product) error {

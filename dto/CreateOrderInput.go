@@ -1,13 +1,9 @@
 package dto
 
-import "github.com/minh6824pro/nxrGO/models"
-
-type CreateOrderItem struct {
-	ProductVariantID uint    `json:"product_variant_id" binding:"required"`
-	Quantity         uint    `json:"quantity" binding:"required,min=1"`
-	Price            float64 `json:"price" binding:"required"`
-	OrderID          uint    `json:"-"`
-}
+import (
+	"github.com/minh6824pro/nxrGO/models"
+	"time"
+)
 
 type CreateOrderInput struct {
 	UserID          uint                 `json:"-"`
@@ -17,4 +13,13 @@ type CreateOrderInput struct {
 	ShippingFee     float64              `json:"shipping_fee" binding:"required"`
 	PhoneNumber     string               `json:"phone_number" binding:"required,len=10"`
 	OrderItems      []CreateOrderItem    `json:"order_items" binding:"required,dive,required"`
+}
+
+type CreateOrderItem struct {
+	ProductVariantID uint      `json:"product_variant_id" binding:"required"`
+	Quantity         uint      `json:"quantity" binding:"required,min=1"`
+	Price            float64   `json:"price" binding:"required"`
+	Timestamp        time.Time `json:"timestamp" binding:"required"`
+	Signature        string    `json:"signature" binding:"required"`
+	MerchantID       uint      `json:"merchant_id" binding:"required"`
 }

@@ -84,10 +84,10 @@ func (pc *ProductController) GetByID(ctx *gin.Context) {
 	product, err := pc.service.GetByID(ctx.Request.Context(), uint(id))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("Product with id %d not found", id)})
+			customErr.WriteError(ctx, customErr.NewError(customErr.ITEM_NOT_FOUND, "product not found", http.StatusNotFound, err))
 			return
 		}
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		customErr.WriteError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, product)
