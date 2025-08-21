@@ -26,6 +26,7 @@ type OrderItem struct {
 	Quantity         uint           `json:"quantity"`
 	Price            float64        `gorm:"type:decimal(10,2)" json:"price"`
 	TotalPrice       float64        `gorm:"type:decimal(10,2)" json:"total_price"`
+	MerchantID       uint           `gorm:"-" json:"-"`
 }
 
 /*

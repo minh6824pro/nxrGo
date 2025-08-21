@@ -21,6 +21,7 @@ func AutoMigrate() {
 		&models.PaymentInfo{},
 		&models.DraftOrder{},
 		&models.Delivery{},
+		&models.DeliveryDetail{},
 	)
 
 	if err != nil {

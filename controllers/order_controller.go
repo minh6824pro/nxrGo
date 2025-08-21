@@ -302,3 +302,34 @@ func (o *OrderController) ListByAdmin(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, list)
 }
+
+// GET /shippingFee?merchantId=1&merchantId=2&lat=16.45&lat=10.77&lon=107.59&lon=106.70
+func (o *OrderController) GetShippingFee(c *gin.Context) {
+	merchantIDs := c.QueryArray("merchantId")
+	userLat := c.Query("lat")
+	userLon := c.Query("lon")
+
+	if userLat == "" || userLon == "" || len(merchantIDs) == 0 {
+		customErr.WriteError(c, customErr.NewError(customErr.BAD_REQUEST, "merchantId, lat and lon are required", http.StatusBadRequest, nil))
+		return
+	}
+
+	var shippingFee []*dto.ShippingFeeResponse
+	for _, mID := range merchantIDs {
+		id, err := strconv.Atoi(mID)
+		if err != nil {
+			log.Println("Error converting merchantId to int", err, mID)
+			continue
+		}
+
+		fee, err := o.service.CalculateShippingFee(c, uint(id), userLon, userLat)
+		if err != nil {
+			log.Println("Error calculating shipping fee", err, mID)
+			continue
+		}
+
+		shippingFee = append(shippingFee, fee...)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": shippingFee})
+}

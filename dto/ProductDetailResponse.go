@@ -2,7 +2,6 @@ package dto
 
 import (
 	"github.com/minh6824pro/nxrGO/models"
-	"time"
 )
 
 type ProductDetailResponse struct {
@@ -28,7 +27,7 @@ type VariantDetailResponse struct {
 	Price        float64                     `json:"price"`
 	ProductID    uint                        `json:"product_id"`
 	Image        string                      `json:"image"`
-	Timestamp    time.Time                   `json:"timestamp"`
+	Timestamp    int64                       `json:"timestamp"`
 	Signature    string                      `json:"signature"`
 	OptionValues []models.VariantOptionValue `gorm:"foreignKey:VariantID" json:"options"`
 }

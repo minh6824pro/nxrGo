@@ -136,6 +136,7 @@ func (d draftOrderGormRepository) ListByUserIdToOrderNull(ctx context.Context, u
 		Preload("OrderItems.Variant.Product").
 		Preload("OrderItems.Variant.OptionValues").
 		Where("user_id = ? AND to_order IS NULL", userID).
+		//	Where("user_id = ? AND to_order IS NULL AND (parent_id IS NULL OR parent_id != ?)", userID, 0).
 		Find(&orders).Error
 	if err != nil {
 		return nil, err

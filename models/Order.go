@@ -16,7 +16,6 @@ const (
 	OrderStateReturnRequested OrderStatus = "RETURN_REQUESTED"
 	OrderStateReturnShipping  OrderStatus = "RETURN_SHIPPING"
 	OrderStateReturned        OrderStatus = "RETURNED"
-	OrderStateRefunded        OrderStatus = "REFUNDED"
 	OrderStateCancelled       OrderStatus = "CANCELLED"
 )
 
@@ -28,15 +27,18 @@ const (
 )
 
 type Order struct {
-	ID              uint          `gorm:"primaryKey" json:"id"`    //
-	UserID          uint          `gorm:"not null" json:"user_id"` //
-	User            User          `gorm:"references:UserID" json:"-"`
-	Status          OrderStatus   `gorm:"type:varchar(20)" json:"status"` //
-	PaymentMethod   PaymentMethod `gorm:"type:varchar(20)" json:"payment_method"`
-	ShippingAddress string        `gorm:"type:varchar(255)" json:"shipping_address"`
-	PhoneNumber     string        `gorm:"type:varchar(10)" json:"phone_number"`
-	PaymentInfos    []PaymentInfo `gorm:"polymorphic:Order;polymorphicValue:order" json:"payment_infos,omitempty"`
-	OrderItems      []OrderItem   `gorm:"polymorphic:Order;polymorphicValue:order" json:"order_items,omitempty"`
+	ID              uint           `gorm:"primaryKey" json:"id"`    //
+	UserID          uint           `gorm:"not null" json:"user_id"` //
+	User            User           `gorm:"references:UserID" json:"-"`
+	Status          OrderStatus    `gorm:"type:varchar(20)" json:"status"` //
+	PaymentMethod   PaymentMethod  `gorm:"type:varchar(20)" json:"payment_method"`
+	DeliveryMode    DeliveryMode   `gorm:"type:varchar(20)" json:"delivery_mode"`
+	ShippingAddress string         `gorm:"type:varchar(255)" json:"shipping_address"`
+	PhoneNumber     string         `gorm:"type:varchar(10)" json:"phone_number"`
+	ParentID        *uint          `gorm:"column:parent_id" json:"parent_id,omitempty"`
+	PaymentInfos    []PaymentInfo  `gorm:"polymorphic:Order;polymorphicValue:order" json:"payment_infos,omitempty"`
+	OrderItems      []OrderItem    `gorm:"polymorphic:Order;polymorphicValue:order" json:"order_items,omitempty"`
+	Delivery        DeliveryDetail `gorm:"polymorphic:Order;polymorphicValue:order" json:"delivery,omitempty"`
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -51,8 +53,7 @@ var orderStatusOrder = map[OrderStatus]int{
 	OrderStateReturnRequested: 6,
 	OrderStateReturnShipping:  7,
 	OrderStateReturned:        8,
-	OrderStateRefunded:        9,
-	OrderStateCancelled:       10,
+	OrderStateCancelled:       9,
 }
 
 func IsBeforeOrderStatus(s1, s2 OrderStatus) bool {

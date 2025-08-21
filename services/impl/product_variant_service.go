@@ -318,7 +318,6 @@ func MapToVariantCartResponse(ctx context.Context, list []models.ProductVariant)
 				optStr += opt.Option.Name + ": " + opt.Value
 			}
 		}
-		// TODO CHANGE MERCHANT NAME IF CACHE
 		cartInfo := dto.VariantCartInfoResponse{
 			ID:           productVariant.ID,
 			Price:        productVariant.Price,
@@ -328,7 +327,7 @@ func MapToVariantCartResponse(ctx context.Context, list []models.ProductVariant)
 			Option:       optStr,
 			MerchantName: productVariant.Product.Merchant.Name,
 			MerchantID:   productVariant.Product.Merchant.ID,
-			Timestamp:    time.Now(),
+			Timestamp:    time.Now().Unix(),
 			Image:        productVariant.Image,
 		}
 		signature := utils.GenerateProductVariantSignature(cartInfo.ID, cartInfo.Price, cartInfo.MerchantID, cartInfo.Timestamp)

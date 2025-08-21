@@ -18,6 +18,7 @@ func RegisterOrderRoutes(rg *gin.RouterGroup, orderModule *modules.OrderModule) 
 		order.POST("/rebuy/:id", orderModule.Controller.ReBuy)
 		order.GET("", orderModule.Controller.List)
 		order.POST("/changepaymentmethod", orderModule.Controller.ChangePaymentMethod)
+		order.GET("/shippingFee", orderModule.Controller.GetShippingFee)
 
 	}
 	order.Use(orderModule.AuthMiddleware.RequireRole(models.RoleAdmin))

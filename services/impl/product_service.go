@@ -321,7 +321,6 @@ func (productService *productService) GetProductList(ctx context.Context, priceM
 	priceAsc *bool, totalBuyDesc *bool, page, pageSize int) ([]*CacheModel.ProductMiniCache, int, error) {
 	var ListProductCache []*CacheModel.ProductMiniCache
 
-	// TODO IMPL +
 	// GetDB
 	listProductFilter, total, err := productService.productRepo.GetProductListFilterOptimized(ctx, priceMin, priceMax, priceAsc, totalBuyDesc, page, pageSize)
 	log.Printf("Product list: %v", listProductFilter)
@@ -341,7 +340,6 @@ func (productService *productService) GetProductListManagement(ctx context.Conte
 	priceAsc *bool, totalBuyDesc *bool, page, pageSize int) ([]*CacheModel.ProductMiniCache, int, error) {
 	var ListProductCache []*CacheModel.ProductMiniCache
 
-	// TODO IMPL +
 	// GetDB
 	listProductFilter, total, err := productService.productRepo.GetProductListFilter(ctx, priceMin, priceMax, priceAsc, totalBuyDesc, page, pageSize)
 	log.Printf("Product list: %v", listProductFilter)
@@ -573,7 +571,7 @@ func MapProductToProductDetailResponse(ctx context.Context, product *models.Prod
 			Price:        variant.Price,
 			ProductID:    variant.ProductID,
 			Image:        variant.Image,
-			Timestamp:    time.Now(),
+			Timestamp:    time.Now().Unix(),
 			OptionValues: variant.OptionValues,
 		}
 

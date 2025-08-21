@@ -16,4 +16,5 @@ type MerchantRepository interface {
 	GetByName(ctx context.Context, name string) (*models.Merchant, error)
 	GetByNameTx(ctx context.Context, tx *gorm.DB, name string) (*models.Merchant, error)
 	CreateTx(ctx context.Context, tx *gorm.DB, merchant *models.Merchant) (*models.Merchant, error)
+	GetDeliveryInfo(ctx context.Context) ([]*models.Delivery, error)
 }

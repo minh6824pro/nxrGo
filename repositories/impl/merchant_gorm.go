@@ -119,3 +119,12 @@ func (r *merchantGormRepository) GetByNameTx(ctx context.Context, tx *gorm.DB, n
 	}
 	return &m, nil
 }
+
+func (r *merchantGormRepository) GetDeliveryInfo(ctx context.Context) ([]*models.Delivery, error) {
+
+	var m []*models.Delivery
+	if err := r.db.WithContext(ctx).Find(&m).Error; err != nil {
+	}
+
+	return m, nil
+}

@@ -28,7 +28,6 @@ func (merchantService *merchantService) Create(ctx context.Context, m *dto.Creat
 		return nil, err
 	}
 	return merchantService.repo.Create(ctx, CreateMerchantInputDtoMapper(m, lat, long))
-	// TODO GO routine change location to gps
 }
 
 func GetGPSLocation(ctx context.Context, locStr string) (string, string, error) {

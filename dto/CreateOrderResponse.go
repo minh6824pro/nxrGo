@@ -17,11 +17,13 @@ type OrderData struct {
 	PaymentMethod   string              `json:"payment_method"`
 	ShippingAddress string              `json:"shipping_address"`
 	PhoneNumber     string              `json:"phone_number"`
+	DeliveryMode    models.DeliveryMode `json:"delivery_mode"`
 	PaymentInfo     PaymentInfoResponse `json:"payment_info"`
 	OrderItems      []OrderItemResponse `json:"order_items"`
 	CreatedAt       time.Time           `json:"CreatedAt"`
 	UpdatedAt       time.Time           `json:"UpdatedAt"`
 	OrderType       models.OrderType    `json:"order_type"`
+	ParentID        *uint               `json:"parent_id"`
 }
 
 type PaymentInfoResponse struct {

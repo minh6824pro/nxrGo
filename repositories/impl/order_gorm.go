@@ -120,7 +120,7 @@ func (o orderGormRepository) ListByUserId(ctx context.Context, userID uint) ([]*
 		Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
 			return db.Order("created_at DESC")
 		}).
-		Where("user_id = ?", userID).
+		Where("user_id = ? AND (parent_id IS NULL OR parent_id != ?)", userID, 0).
 		Find(&orders).Error
 	if err != nil {
 		return nil, err
