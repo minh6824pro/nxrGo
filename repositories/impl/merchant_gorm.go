@@ -120,11 +120,19 @@ func (r *merchantGormRepository) GetByNameTx(ctx context.Context, tx *gorm.DB, n
 	return &m, nil
 }
 
-func (r *merchantGormRepository) GetDeliveryInfo(ctx context.Context) ([]*models.Delivery, error) {
+func (r *merchantGormRepository) GetDeliveriesInfo(ctx context.Context) ([]*models.Delivery, error) {
 
 	var m []*models.Delivery
 	if err := r.db.WithContext(ctx).Find(&m).Error; err != nil {
 	}
 
 	return m, nil
+}
+
+func (r *merchantGormRepository) GetDeliveryInfo(ctx context.Context, id uint) (*models.Delivery, error) {
+	var m models.Delivery
+	if err := r.db.WithContext(ctx).First(&m, id).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
 }

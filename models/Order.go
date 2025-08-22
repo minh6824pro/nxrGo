@@ -36,6 +36,8 @@ type Order struct {
 	ShippingAddress string         `gorm:"type:varchar(255)" json:"shipping_address"`
 	PhoneNumber     string         `gorm:"type:varchar(10)" json:"phone_number"`
 	ParentID        *uint          `gorm:"column:parent_id" json:"parent_id,omitempty"`
+	Latitude        string         `gorm:"type:varchar(20)" json:"latitude"`
+	Longitude       string         `gorm:"type:varchar(20)" json:"longitude"`
 	PaymentInfos    []PaymentInfo  `gorm:"polymorphic:Order;polymorphicValue:order" json:"payment_infos,omitempty"`
 	OrderItems      []OrderItem    `gorm:"polymorphic:Order;polymorphicValue:order" json:"order_items,omitempty"`
 	Delivery        DeliveryDetail `gorm:"polymorphic:Order;polymorphicValue:order" json:"delivery,omitempty"`

@@ -129,7 +129,7 @@ func (r *productVariantRedisService) DeleteMiniProduct(variantId uint) error {
 		Pluck("product_id", &productID).Error
 
 	if err != nil {
-		log.Println("CO gi do da xay ra: ", err)
+		log.Println("Error while delete cache: ", err)
 	}
 	log.Println(productID)
 

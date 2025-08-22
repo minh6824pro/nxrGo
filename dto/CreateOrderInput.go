@@ -25,3 +25,9 @@ type CreateOrderItem struct {
 	Signature        string  `json:"signature" binding:"required"`
 	MerchantID       uint    `json:"merchant_id" binding:"required"`
 }
+
+type OrderItemForSplit struct {
+	ID         uint `json:"id"`
+	MerchantID uint `json:"merchant_id"`
+	DeliveryID uint `json:"delivery_id"`
+}

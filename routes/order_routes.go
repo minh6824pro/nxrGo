@@ -19,6 +19,7 @@ func RegisterOrderRoutes(rg *gin.RouterGroup, orderModule *modules.OrderModule) 
 		order.GET("", orderModule.Controller.List)
 		order.POST("/changepaymentmethod", orderModule.Controller.ChangePaymentMethod)
 		order.GET("/shippingFee", orderModule.Controller.GetShippingFee)
+		order.GET("/mockpayos/:id", orderModule.Controller.PaymentSuccessMock)
 
 	}
 	order.Use(orderModule.AuthMiddleware.RequireRole(models.RoleAdmin))

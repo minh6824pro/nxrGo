@@ -21,6 +21,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -246,7 +247,7 @@ return {"OK"}
 			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Failed to reserve stock after retries", http.StatusInternalServerError, nil)
 		}
 
-		// Remove cache
+		// Remove landing page cache
 		for _, oi := range input.OrderItems {
 			oi := oi
 			go func() {
@@ -262,6 +263,8 @@ return {"OK"}
 			PaymentMethod:   input.PaymentMethod,
 			PhoneNumber:     input.PhoneNumber,
 			DeliveryMode:    input.ShippingFeeInput[0].Mode,
+			Latitude:        input.Latitude,
+			Longitude:       input.Longitude,
 		}
 		if err := o.draftOrderRepo.Create(ctx, &draftOrder); err != nil {
 			return nil, customErr.NewError(customErr.INTERNAL_ERROR, fmt.Sprintf("Draft order creation error: %v", err.Error()), http.StatusBadRequest, nil)
@@ -287,7 +290,7 @@ return {"OK"}
 		newDeliveryDetail := models.DeliveryDetail{
 			OrderID:    draftOrder.ID,
 			OrderType:  models.OrderTypeDraftOrder,
-			DeliveryID: draftOrder.ID,
+			DeliveryID: input.ShippingFeeInput[0].DeliveryID,
 		}
 		if err := o.db.Create(&newDeliveryDetail).Error; err != nil {
 			return nil, err
@@ -315,18 +318,18 @@ return {"OK"}
 		merchantIDs = append(merchantIDs, id)
 	}
 	if len(merchantIDs) > 1 {
-		// Split order
+		// Parse response
 		response, err := o.MapDraftOrderToCreateOrderResponse(ctx, &draftOrder)
 		if err != nil {
 			return nil, err
 		}
-		subDraftOrders, err := o.SplitOrder(ctx, &draftOrder, orderItems, merchantIDs, &input)
-		if err != nil {
-			return nil, err
-		}
-
 		if draftOrder.PaymentMethod == models.PaymentMethodCOD {
-
+			// Split order if COD
+			subDraftOrders, err := o.SplitOrder(ctx, &draftOrder, orderItems, merchantIDs, input.ShippingFeeInput)
+			if err != nil {
+				return nil, err
+			}
+			//Convert to order
 			go func() {
 
 				_, err := o.DraftsOrderToOrder(context.Background(), subDraftOrders)
@@ -336,13 +339,21 @@ return {"OK"}
 				}
 
 			}()
+		} else {
+			// Mark need to split after payment success
+			temp := uint(0)
+			draftOrder.ParentID = &temp
+			if err = o.draftOrderRepo.Save(ctx, &draftOrder); err != nil {
+				log.Println("Error in draft order to order:", err)
+			}
+
 		}
 		return response, nil
 
 	} else {
-		// Continue
+		// If not split
 
-		// Convert into Real order if payment method = COD
+		// Convert into order if payment method = COD
 		if draftOrder.PaymentMethod == models.PaymentMethodCOD {
 			order, err := o.DraftOrderToOrder(ctx, &draftOrder, orderItems)
 			if err != nil {
@@ -426,6 +437,8 @@ func (o *orderService) DraftOrderToOrder(ctx context.Context, draftOrder *models
 		ParentID:        draftOrder.ParentID,
 		DeliveryMode:    draftOrder.DeliveryMode,
 		Delivery:        draftOrder.Delivery,
+		Latitude:        draftOrder.Latitude,
+		Longitude:       draftOrder.Longitude,
 	}
 	if err := o.orderRepo.Create(ctx, &order); err != nil {
 		return order, err
@@ -442,8 +455,8 @@ func (o *orderService) DraftOrderToOrder(ctx context.Context, draftOrder *models
 	return order, nil
 }
 
-func (o *orderService) DraftsOrderToOrder(ctx context.Context, draftOrder []*models.DraftOrder) (models.Order, error) {
-
+func (o *orderService) DraftsOrderToOrder(ctx context.Context, draftOrder []*models.DraftOrder) ([]models.Order, error) {
+	var orders []models.Order
 	// Create parent order
 	i := len(draftOrder) - 1
 	order := models.Order{
@@ -457,17 +470,20 @@ func (o *orderService) DraftsOrderToOrder(ctx context.Context, draftOrder []*mod
 		ParentID:        draftOrder[i].ParentID,
 		DeliveryMode:    draftOrder[i].DeliveryMode,
 		Delivery:        draftOrder[i].Delivery,
+		Latitude:        draftOrder[i].Latitude,
+		Longitude:       draftOrder[i].Longitude,
 	}
 	if err := o.orderRepo.Create(ctx, &order); err != nil {
-		return order, err
+		return nil, err
 	}
+	orders = append(orders, order)
 	draftOrder[i].ToOrderID = &order.ID
 	draftOrder[i].PaymentInfos = nil
 	draftOrder[i].OrderItems = nil
 	draftOrder[i].Delivery = models.DeliveryDetail{}
-
 	if err := o.draftOrderRepo.Save(ctx, draftOrder[i]); err != nil {
 	}
+	// create sub order
 	for i = 0; i < len(draftOrder)-1; i++ {
 		subOrder := models.Order{
 			UserID:          draftOrder[i].UserID,
@@ -480,20 +496,23 @@ func (o *orderService) DraftsOrderToOrder(ctx context.Context, draftOrder []*mod
 			ParentID:        &order.ID,
 			DeliveryMode:    draftOrder[i].DeliveryMode,
 			Delivery:        draftOrder[i].Delivery,
+			Latitude:        draftOrder[i].Latitude,
+			Longitude:       draftOrder[i].Longitude,
 		}
 		if err := o.orderRepo.Create(ctx, &subOrder); err != nil {
 			log.Println("Create sub order error")
 		}
+		orders = append(orders, subOrder)
 		draftOrder[i].ToOrderID = &subOrder.ID
 		draftOrder[i].PaymentInfos = nil
 		draftOrder[i].OrderItems = nil
 		draftOrder[i].Delivery = models.DeliveryDetail{}
 		err := o.draftOrderRepo.Save(ctx, draftOrder[i])
 		if err != nil {
-			return models.Order{}, err
+			return nil, err
 		}
 	}
-	return order, nil
+	return orders, nil
 }
 
 func (o *orderService) DraftOrderToOrderResponse(ctx context.Context, draftOrder *models.DraftOrder, orderItems []models.OrderItem) (models.Order, error) {
@@ -510,7 +529,7 @@ func (o *orderService) DraftOrderToOrderResponse(ctx context.Context, draftOrder
 	return order, nil
 }
 
-// TODO IMPLEMENT IF order is draft and order is real order ( OK)
+// TODO IMPLEMENT SPLIT ORDER
 func (o *orderService) PayOSPaymentSuccess(ctx context.Context, paymentInfoID int64) {
 	paymentInfo, err := o.paymentInfoRepo.GetByID(ctx, paymentInfoID)
 	if err != nil {
@@ -534,10 +553,63 @@ func (o *orderService) PayOSPaymentSuccess(ctx context.Context, paymentInfoID in
 			log.Printf(err.Error(), "while getting draftOrder")
 			return
 		}
-		_, err = o.DraftOrderToOrder(ctx, draftOrder, draftOrder.OrderItems)
-		if err != nil {
-			log.Printf(err.Error(), "while create Order to update PayOSPayment")
-			return
+		// Check if order need to split
+		if draftOrder.ParentID != nil && *draftOrder.ParentID == 0 {
+			log.Println("NEED SPLIT")
+			//split
+			infos, err2 := o.draftOrderRepo.GetForSplit(ctx, draftOrder.ID)
+			if err2 != nil {
+				log.Println(err2, " While split order (bank payment success)")
+				return
+			}
+			//Get merchant id distinct
+			var merchantIDs []uint
+			merchantIDMap := make(map[uint]bool)
+			itemAndMerchantMap := make(map[uint]uint) // key: OrderItem ID, value: MerchantID
+
+			for _, info := range infos {
+				if !merchantIDMap[info.MerchantID] {
+					merchantIDMap[info.MerchantID] = true
+					merchantIDs = append(merchantIDs, info.MerchantID)
+				}
+				itemAndMerchantMap[info.ID] = info.MerchantID
+			}
+			//Inject merchant ID for orderItems
+			for i := range draftOrder.OrderItems {
+				draftOrder.OrderItems[i].MerchantID = itemAndMerchantMap[draftOrder.OrderItems[i].ID]
+			}
+			log.Println(merchantIDs)
+			var shippingFeeResponse []dto.ShippingFeeResponse
+			for _, merchantID := range merchantIDs {
+				fee, err := o.CalculateShippingFee(ctx, merchantID, draftOrder.Longitude, draftOrder.Latitude, infos[0].DeliveryID)
+				if err != nil {
+					return
+				}
+				shippingFeeResponse = append(shippingFeeResponse, fee...)
+
+			}
+			for _, oi := range draftOrder.OrderItems {
+				log.Println(oi.MerchantID, "merchant")
+			}
+			draftsSplit, err := o.SplitOrder(ctx, draftOrder, draftOrder.OrderItems, merchantIDs, shippingFeeResponse)
+			if err != nil {
+				log.Printf(err.Error(), "while split order (bank payment success)")
+				return
+			}
+
+			_, err = o.DraftsOrderToOrder(ctx, draftsSplit)
+			if err != nil {
+				log.Printf(err.Error(), "while convert drafts order to order(bank payment success)")
+				return
+			}
+
+		} else {
+			// not split
+			_, err = o.DraftOrderToOrder(ctx, draftOrder, draftOrder.OrderItems)
+			if err != nil {
+				log.Printf(err.Error(), "while create Order to update PayOSPayment")
+				return
+			}
 		}
 	} else {
 		// if order update
@@ -637,6 +709,7 @@ func (o *orderService) PayOSPaymentCancelled(ctx context.Context, paymentInfoId 
 			if err != nil {
 				log.Printf(err.Error(), "while incrementing stock variant after cancelled payment")
 			}
+
 		}
 
 		// Not latest => update paymentinfo
@@ -653,6 +726,7 @@ func (o *orderService) PayOSPaymentCancelled(ctx context.Context, paymentInfoId 
 			log.Printf("error 2 while transitioning payment info from PayOSPayment payment id: %d", paymentInfo.ID)
 		}
 	} else {
+		// if is order
 		order, err2 := o.orderRepo.GetById(ctx, paymentInfo.OrderID)
 		if err2 != nil {
 			log.Printf(err.Error(), "while getting Order to update PayOSPayment")
@@ -1087,28 +1161,55 @@ func (o *orderService) MapDraftOrderToListOrderDataResponse(ctx context.Context,
 
 func (o *orderService) ListByUserId(ctx context.Context, userID uint) ([]*dto.OrderData, error) {
 	var results []*dto.OrderData
+
 	orders, err := o.orderRepo.ListByUserId(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
+
 	drafts, err := o.draftOrderRepo.ListByUserIdToOrderNull(ctx, userID)
+
 	if err != nil {
 		return nil, err
 	}
+
+	// Draft order Bank method Split
+	childItemsMap := make(map[uint][]models.OrderItem)
+	var parents []*models.DraftOrder
+
+	// Split parent and child
+	for _, draft := range drafts {
+		if draft.ParentID != nil && *draft.ParentID != 0 {
+			childItemsMap[*draft.ParentID] = append(childItemsMap[*draft.ParentID], draft.OrderItems...)
+		} else {
+			parents = append(parents, draft)
+		}
+	}
+
+	// merge child item into parent
+	for i := range parents {
+		if items, ok := childItemsMap[parents[i].ID]; ok {
+			parents[i].OrderItems = append(parents[i].OrderItems, items...)
+		}
+	}
+
+	// Map to DTO
 	orderRs, err := o.MapOrdersToListOrderDataResponses(ctx, orders)
 	if err != nil {
 		return nil, err
 	}
-	draftRs, err := o.MapDraftOrdersToListOrderDataResponses(ctx, drafts)
+
+	draftRs, err := o.MapDraftOrdersToListOrderDataResponses(ctx, parents)
 	if err != nil {
 		return nil, err
 	}
 	results = append(results, orderRs...)
 	results = append(results, draftRs...)
 
-	//sort.Slice(results, func(i, j int) bool {
-	//	return results[i].CreatedAt.After(results[j].CreatedAt)
-	//})
+	// Sort by create at
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].CreatedAt.After(results[j].CreatedAt)
+	})
 
 	return results, nil
 }
@@ -1255,6 +1356,8 @@ func (o *orderService) CreateOrderWithDb(ctx context.Context, input dto.CreateOr
 			ShippingAddress: input.ShippingAddress,
 			PhoneNumber:     input.PhoneNumber,
 			DeliveryMode:    input.ShippingFeeInput[0].Mode,
+			Latitude:        input.Latitude,
+			Longitude:       input.Longitude,
 		}
 		if err := tx.Create(&createdDraftOrder).Error; err != nil {
 			return err
@@ -1305,15 +1408,17 @@ func GeneratePaymentInfoID() int64 {
 }
 
 func (o *orderService) ChangePaymentMethod(c *gin.Context, paymentChange dto.ChangePaymentMethodRequest, userID uint) (*models.Order, error) {
-	//TODO implement me
 	payment, order, draft, err := o.paymentInfoRepo.GetByIdAndUserIdAndOrderId(c, paymentChange.PaymentID, userID, paymentChange.OrderId)
+
+	if payment.Status != models.PaymentPending {
+		return nil, customErr.NewError(customErr.BAD_REQUEST, "Cant change payment method", http.StatusBadRequest, nil)
+	}
 	if err != nil {
 		return nil, err
 	}
 
 	if payment.OrderType == models.OrderTypeDraftOrder {
-		//TODO IMPLEMENT FOR DRAFT => 100% change to cod
-		// Check status if ok
+
 		if draft.ID == 0 {
 			return nil, customErr.NewError(customErr.ITEM_NOT_FOUND, "Cant find order", http.StatusBadRequest, err)
 		}
@@ -1324,17 +1429,71 @@ func (o *orderService) ChangePaymentMethod(c *gin.Context, paymentChange dto.Cha
 			return nil, customErr.NewError(customErr.BAD_REQUEST, "Can't change this order payment method", http.StatusBadRequest, err)
 		}
 		// Change to COD
-		orderUpdated, err := o.ChangeToCODPaymentFromDraft(c, draft, payment.Total, payment.ShippingFee)
-		if err != nil {
-			return orderUpdated, err
+		// Check if order need to split
+		//TODO
+		if draft.ParentID != nil && *draft.ParentID == 0 {
+			//split
+			infos, err2 := o.draftOrderRepo.GetForSplit(c, draft.ID)
+			if err2 != nil {
+				log.Println(err2, " While split order (bank payment success)")
+				return nil, customErr.NewError(customErr.BAD_REQUEST, "Cant change payment method", http.StatusBadRequest, err)
+			}
+
+			//Get merchant id distinct
+			var merchantIDs []uint
+			merchantIDMap := make(map[uint]bool)
+			itemAndMerchantMap := make(map[uint]uint) // key: OrderItem ID, value: MerchantID
+
+			for _, info := range infos {
+				if !merchantIDMap[info.MerchantID] {
+					merchantIDMap[info.MerchantID] = true
+					merchantIDs = append(merchantIDs, info.MerchantID)
+				}
+				itemAndMerchantMap[info.ID] = info.MerchantID
+			}
+
+			var shippingFeeResponse []dto.ShippingFeeResponse
+			for _, merchantID := range merchantIDs {
+				fee, err := o.CalculateShippingFee(c, merchantID, draft.Longitude, draft.Latitude, infos[0].DeliveryID)
+				if err != nil {
+					return nil, customErr.NewError(customErr.BAD_REQUEST, "Cant change payment method 2", http.StatusBadRequest, err)
+				}
+				shippingFeeResponse = append(shippingFeeResponse, fee...)
+			}
+
+			// Change payment method and convert to order
+			orderUpdated, err := o.ChangeToCODPaymentFromDraft(c, draft, payment.Total, payment.ShippingFee)
+			if err != nil {
+				return orderUpdated, err
+			}
+
+			// Inject merchant ID for orderItems
+			for i := range orderUpdated.OrderItems {
+				orderUpdated.OrderItems[i].MerchantID = itemAndMerchantMap[orderUpdated.OrderItems[i].ID]
+			}
+			// Split
+			o.SplitOrderAfterChangePaymentMethod(c, orderUpdated, orderUpdated.OrderItems, merchantIDs, shippingFeeResponse)
+
+			cancelReason := "Change payment method"
+			_, err = payos.CancelPaymentLink(strconv.FormatInt(payment.ID, 10), &cancelReason)
+			if err != nil {
+				log.Println("Payment id: ", payment.ID, " cant cancel payment payos", err)
+			}
+			return orderUpdated, nil
+		} else {
+			//nosplit
+			orderUpdated, err := o.ChangeToCODPaymentFromDraft(c, draft, payment.Total, payment.ShippingFee)
+			if err != nil {
+				return orderUpdated, err
+			}
+			// Cancel payment link
+			cancelReason := "Change payment method"
+			_, err = payos.CancelPaymentLink(strconv.FormatInt(payment.ID, 10), &cancelReason)
+			if err != nil {
+				log.Println("Payment id: ", payment.ID, " cant cancel payment payos", err)
+			}
+			return orderUpdated, nil
 		}
-		// Delete paymentlink
-		cancelReason := "Change payment method"
-		_, err = payos.CancelPaymentLink(strconv.FormatInt(payment.ID, 10), &cancelReason)
-		if err != nil {
-			log.Println("Payment id: ", payment.ID, " cant cancel payment payos", err)
-		}
-		return orderUpdated, nil
 	} else {
 		//TODO IMPLEMENT ORDER change
 		if order.ID == 0 {
@@ -1359,6 +1518,11 @@ func (o *orderService) ChangePaymentMethod(c *gin.Context, paymentChange dto.Cha
 			if err != nil {
 				return nil, err
 			}
+			payment.Status = models.PaymentCanceled
+			payment.CancellationReason = "Change payment method"
+			if err := o.paymentInfoRepo.Save(c, &payment); err != nil {
+				log.Println("Fail  to cancel previous COD payment")
+			}
 			return updatedOrder, nil
 		}
 	}
@@ -1373,6 +1537,10 @@ func (o *orderService) ChangeToCODPaymentFromDraft(c *gin.Context, draft *models
 		PaymentMethod:   models.PaymentMethodCOD,
 		ShippingAddress: draft.ShippingAddress,
 		PhoneNumber:     draft.PhoneNumber,
+		DeliveryMode:    draft.DeliveryMode,
+		Longitude:       draft.Longitude,
+		Latitude:        draft.Latitude,
+		Delivery:        draft.Delivery,
 	}
 	if err := o.orderRepo.Create(c, order); err != nil {
 		return nil, err
@@ -1396,11 +1564,13 @@ func (o *orderService) ChangeToCODPaymentFromDraft(c *gin.Context, draft *models
 		if err := o.orderItemRepo.Save(c, &oi); err != nil {
 			log.Printf(err.Error(), "while saving order item")
 		}
+		order.OrderItems = append(order.OrderItems, oi)
 	}
 	order.OrderItems = draft.OrderItems
 
 	draft.OrderItems = nil
 	draft.ToOrderID = &order.ID
+	draft.Delivery = models.DeliveryDetail{}
 	if err := o.draftOrderRepo.Save(c, draft); err != nil {
 		log.Printf(err.Error(), "while saving draft")
 	}
@@ -1482,7 +1652,7 @@ func (o *orderService) ChangeToBankPaymentFromOrder(c *gin.Context, order *model
 	order.PaymentInfos = append(order.PaymentInfos, *paymentInfo)
 	return order, nil
 }
-func (o *orderService) SplitOrder(ctx context.Context, draftOrder *models.DraftOrder, orderItems []models.OrderItem, merchantIDs []uint, input *dto.CreateOrderInput) ([]*models.DraftOrder, error) {
+func (o *orderService) SplitOrder(ctx context.Context, draftOrder *models.DraftOrder, orderItems []models.OrderItem, merchantIDs []uint, shippingFeeResponses []dto.ShippingFeeResponse) ([]*models.DraftOrder, error) {
 
 	groups := make(map[uint][]models.OrderItem)
 
@@ -1490,13 +1660,11 @@ func (o *orderService) SplitOrder(ctx context.Context, draftOrder *models.DraftO
 	for _, oi := range orderItems {
 		groups[oi.MerchantID] = append(groups[oi.MerchantID], oi)
 	}
-
 	// Slice to save sub draft
 	var subDraftOrders []*models.DraftOrder
 
 	for _, merchantID := range merchantIDs {
 		orderItemsSplit := groups[merchantID]
-
 		draftOrderSplit := &models.DraftOrder{
 			UserID:          draftOrder.UserID,
 			Status:          models.OrderStatePending,
@@ -1505,6 +1673,8 @@ func (o *orderService) SplitOrder(ctx context.Context, draftOrder *models.DraftO
 			PhoneNumber:     draftOrder.PhoneNumber,
 			ParentID:        &draftOrder.ID,
 			DeliveryMode:    draftOrder.DeliveryMode,
+			Latitude:        draftOrder.Latitude,
+			Longitude:       draftOrder.Longitude,
 		}
 		if err := o.draftOrderRepo.Create(ctx, draftOrderSplit); err != nil {
 			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Split order error", http.StatusInternalServerError, err)
@@ -1533,13 +1703,13 @@ func (o *orderService) SplitOrder(ctx context.Context, draftOrder *models.DraftO
 
 		// Find shipping fee of merchant
 		var tempShippingFee float64
-		for _, ship := range input.ShippingFeeInput {
+		for _, ship := range shippingFeeResponses {
 			if ship.MerchantID == merchantID {
 				tempShippingFee = ship.Fee
 				break
 			}
 		}
-
+		log.Println("1, tempshippingfee: ", tempShippingFee, " total:", total)
 		// Create payment for sub draft
 		var paymentSplit = &models.PaymentInfo{
 			ID:          GeneratePaymentInfoID(),
@@ -1547,10 +1717,11 @@ func (o *orderService) SplitOrder(ctx context.Context, draftOrder *models.DraftO
 			ShippingFee: tempShippingFee,
 			OrderID:     draftOrderSplit.ID,
 			OrderType:   models.OrderTypeDraftOrder,
-			Status:      models.PaymentPending,
+			Status:      draftOrder.PaymentInfos[0].Status,
 			ParentID:    &draftOrder.PaymentInfos[0].ID,
 		}
-		if err := o.paymentInfoRepo.Save(ctx, paymentSplit); err != nil {
+		log.Println("2, paymentsplit: ", paymentSplit.Total, " ,", paymentSplit.ShippingFee)
+		if err := o.paymentInfoRepo.Create(ctx, paymentSplit); err != nil {
 			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "CreatePayment error", http.StatusInternalServerError, err)
 		}
 
@@ -1581,7 +1752,110 @@ func (o *orderService) SplitOrder(ctx context.Context, draftOrder *models.DraftO
 	return subDraftOrders, nil
 }
 
-func (o *orderService) CalculateShippingFee(c context.Context, merchantID uint, destLon, destLat string) ([]*dto.ShippingFeeResponse, error) {
+func (o *orderService) SplitOrderAfterChangePaymentMethod(ctx context.Context, order *models.Order, orderItems []models.OrderItem, merchantIDs []uint, shippingFeeResponses []dto.ShippingFeeResponse) ([]*models.Order, error) {
+
+	// TODO IMPLEMENT
+	groups := make(map[uint][]models.OrderItem)
+
+	// Group order items by merchantID
+	for _, oi := range orderItems {
+		groups[oi.MerchantID] = append(groups[oi.MerchantID], oi)
+	}
+	// Slice to save sub order
+	var subOrders []*models.Order
+
+	// Create order item for sub order
+	for _, merchantID := range merchantIDs {
+		orderItemsSplit := groups[merchantID]
+		orderSplit := &models.Order{
+			UserID:          order.UserID,
+			Status:          models.OrderStatePending,
+			ShippingAddress: order.ShippingAddress,
+			PaymentMethod:   order.PaymentMethod,
+			PhoneNumber:     order.PhoneNumber,
+			ParentID:        &order.ID,
+			DeliveryMode:    order.DeliveryMode,
+			Latitude:        order.Latitude,
+			Longitude:       order.Longitude,
+		}
+		if err := o.orderRepo.Create(ctx, orderSplit); err != nil {
+			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Split order error", http.StatusInternalServerError, err)
+		}
+
+		// Create sub delivery detail
+		subDeliveryDetail := &models.DeliveryDetail{
+			OrderID:    orderSplit.ID,
+			DeliveryID: shippingFeeResponses[0].DeliveryID,
+			OrderType:  models.OrderTypeOrder,
+		}
+
+		if err := o.db.WithContext(ctx).Create(&subDeliveryDetail).Error; err != nil {
+			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Split order error 2", http.StatusInternalServerError, err)
+		}
+
+		// Change order items reference
+		var total float64
+		for _, orderItemSplit := range orderItemsSplit {
+			orderItemSplit.OrderID = orderSplit.ID
+			total += orderItemSplit.TotalPrice
+			orderItemSplit.OrderType = models.OrderTypeOrder
+			if err := o.orderItemRepo.Save(ctx, &orderItemSplit); err != nil {
+				return nil, customErr.NewError(customErr.INTERNAL_ERROR, "Change order item reference error", http.StatusInternalServerError, err)
+			}
+		}
+
+		// Find shipping fee of merchant
+		var tempShippingFee float64
+		for _, ship := range shippingFeeResponses {
+			if ship.MerchantID == merchantID {
+				tempShippingFee = ship.Fee
+				break
+			}
+		}
+		log.Println("1, tempshippingfee: ", tempShippingFee, " total:", total)
+		// Create payment for sub draft
+		var paymentSplit = &models.PaymentInfo{
+			ID:          GeneratePaymentInfoID(),
+			Total:       total + tempShippingFee,
+			ShippingFee: tempShippingFee,
+			OrderID:     orderSplit.ID,
+			OrderType:   models.OrderTypeOrder,
+			Status:      order.PaymentInfos[0].Status,
+			ParentID:    &order.PaymentInfos[0].ID,
+		}
+		log.Println("2, paymentsplit: ", paymentSplit.Total, " ,", paymentSplit.ShippingFee)
+		if err := o.paymentInfoRepo.Create(ctx, paymentSplit); err != nil {
+			return nil, customErr.NewError(customErr.INTERNAL_ERROR, "CreatePayment error", http.StatusInternalServerError, err)
+		}
+
+		// Append sub draft to slice
+		orderSplit.OrderItems = orderItemsSplit
+		orderSplit.PaymentInfos = []models.PaymentInfo{*paymentSplit}
+		orderSplit.Delivery = *subDeliveryDetail
+		subOrders = append(subOrders, orderSplit)
+	}
+
+	// Reset  parent draft
+	temp1 := uint(0)
+	temp2 := int64(0)
+	order.OrderItems = nil
+	order.ParentID = &temp1
+	order.PaymentInfos[0].ParentID = &temp2
+	err := o.orderRepo.Save(ctx, order)
+	if err != nil {
+		log.Println("Error while split draft order ", err)
+	}
+
+	err = o.paymentInfoRepo.Save(ctx, &order.PaymentInfos[0])
+	if err != nil {
+		log.Println("Error while split draft order ", err)
+	}
+	subOrders = append(subOrders, order)
+
+	return subOrders, nil
+}
+
+func (o *orderService) CalculateShippingFees(c context.Context, merchantID uint, destLon, destLat string) ([]*dto.ShippingFeeResponse, error) {
 	merchant, err := o.merchantRepo.GetByID(c, merchantID)
 	if err != nil {
 		return nil, err
@@ -1613,7 +1887,7 @@ func (o *orderService) CalculateShippingFee(c context.Context, merchantID uint, 
 	distanceKm := float64(int(osrmResp.Routes[0].Distance / 1000.0))
 
 	var shippingFee []*dto.ShippingFeeResponse
-	deliveries, err := o.merchantRepo.GetDeliveryInfo(c)
+	deliveries, err := o.merchantRepo.GetDeliveriesInfo(c)
 	if err != nil {
 		return nil, err
 	}
@@ -1630,5 +1904,56 @@ func (o *orderService) CalculateShippingFee(c context.Context, merchantID uint, 
 		feeDto.Signature = utils.GenerateShippingFeeSignature(merchantID, delivery.ID, fee, destLat, destLon, feeDto.Timestamp)
 		shippingFee = append(shippingFee, feeDto)
 	}
+	return shippingFee, nil
+}
+
+func (o *orderService) CalculateShippingFee(c context.Context, merchantID uint, destLon, destLat string, deliveryID uint) ([]dto.ShippingFeeResponse, error) {
+	merchant, err := o.merchantRepo.GetByID(c, merchantID)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf("http://localhost:5000/route/v1/driving/%s,%s;%s,%s?overview=false",
+		merchant.Longitude, merchant.Latitude, destLon, destLat)
+
+	log.Println("Routing url: ", url)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var osrmResp dto.OSRMResponse
+	if err := json.Unmarshal(body, &osrmResp); err != nil {
+		return nil, err
+	}
+
+	if len(osrmResp.Routes) == 0 {
+		return nil, fmt.Errorf("no route found")
+	}
+	distanceKm := float64(int(osrmResp.Routes[0].Distance / 1000.0))
+
+	var shippingFee []dto.ShippingFeeResponse
+	delivery, err := o.merchantRepo.GetDeliveryInfo(c, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	fee := delivery.BasePrice + delivery.PricePerKm*distanceKm
+	feeDto := dto.ShippingFeeResponse{
+		Name:       delivery.Name,
+		Mode:       delivery.DeliveryMode,
+		Fee:        fee,
+		MerchantID: merchantID,
+		Timestamp:  time.Now().Unix(),
+		DeliveryID: delivery.ID,
+	}
+	feeDto.Signature = utils.GenerateShippingFeeSignature(merchantID, delivery.ID, fee, destLat, destLon, feeDto.Timestamp)
+	shippingFee = append(shippingFee, feeDto)
+
 	return shippingFee, nil
 }

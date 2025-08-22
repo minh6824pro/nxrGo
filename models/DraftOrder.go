@@ -10,6 +10,8 @@ type DraftOrder struct {
 	PaymentMethod   PaymentMethod `gorm:"type:varchar(20)" json:"payment_method"`
 	ShippingAddress string        `gorm:"type:varchar(255)" json:"shipping_address"`
 	PhoneNumber     string        `gorm:"type:varchar(10)" json:"phone_number"`
+	Latitude        string        `gorm:"type:varchar(20)" json:"latitude"`
+	Longitude       string        `gorm:"type:varchar(20)" json:"longitude"`
 	PaymentInfos    []PaymentInfo `gorm:"polymorphic:Order;polymorphicValue:draft_order" json:"payment_infos,omitempty"`
 	ToOrderID       *uint         `gorm:"column:to_order" json:"to_order"`
 	OrderItems      []OrderItem   `gorm:"polymorphic:Order;polymorphicValue:draft_order" json:"order_items,omitempty"`

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/minh6824pro/nxrGO/dto"
 	customErr "github.com/minh6824pro/nxrGO/errors"
@@ -322,7 +323,7 @@ func (o *OrderController) GetShippingFee(c *gin.Context) {
 			continue
 		}
 
-		fee, err := o.service.CalculateShippingFee(c, uint(id), userLon, userLat)
+		fee, err := o.service.CalculateShippingFees(c, uint(id), userLon, userLat)
 		if err != nil {
 			log.Println("Error calculating shipping fee", err, mID)
 			continue
@@ -332,4 +333,26 @@ func (o *OrderController) GetShippingFee(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": shippingFee})
+}
+
+func (o *OrderController) PaymentSuccessMock(c *gin.Context) {
+	// Lấy param từ path
+	idStr := c.Param("id") // "12345"
+
+	// Convert sang int64
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	// Debug thử
+	fmt.Println("OrderID:", id)
+
+	// TODO: gọi service xử lý PaymentSuccess
+	o.service.PayOSPaymentSuccess(c, id)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Payment success mock",
+		"orderId": id,
+	})
 }

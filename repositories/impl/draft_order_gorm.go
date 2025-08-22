@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/go-sql-driver/mysql"
+	"github.com/minh6824pro/nxrGO/dto"
 	customErr "github.com/minh6824pro/nxrGO/errors"
 	"github.com/minh6824pro/nxrGO/models"
 	"github.com/minh6824pro/nxrGO/repositories"
@@ -65,6 +66,7 @@ func (d draftOrderGormRepository) GetById(ctx context.Context, orderID uint) (*m
 	if err := d.db.WithContext(ctx).
 		Where("id = ?", orderID).
 		Preload("OrderItems").
+		Preload("Delivery").
 		Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
 			return db.Order("created_at DESC")
 		}).
@@ -78,7 +80,13 @@ func (d draftOrderGormRepository) GetById(ctx context.Context, orderID uint) (*m
 
 	return &m, nil
 }
+func (d draftOrderGormRepository) GetByParentId(ctx context.Context, parentId uint) ([]models.DraftOrder, error) {
+	var m []models.DraftOrder
+	if err := d.db.WithContext(ctx).Where("parent_id = ?", parentId).Find(&m).Error; err != nil {
+	}
 
+	return m, nil
+}
 func (d draftOrderGormRepository) GetsForDbUpdate(ctx context.Context) ([]models.DraftOrder, error) {
 	var draftOrders []models.DraftOrder
 	err := d.db.WithContext(ctx).
@@ -158,4 +166,43 @@ func (d draftOrderGormRepository) ListByAdmin(ctx context.Context) ([]*models.Dr
 		return nil, err
 	}
 	return orders, nil
+}
+
+func (d draftOrderGormRepository) GetForSplitOrder(ctx context.Context, orderID uint) (*models.DraftOrder, error) {
+
+	var m models.DraftOrder
+	if err := d.db.WithContext(ctx).
+		Where("id = ?", orderID).
+		Preload("OrderItems").
+		Preload("OrderItems.Variant.Product.Merchant").
+		Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
+			return db.Order("created_at DESC")
+		}).
+		First(&m).Error; err != nil {
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, customErr.NewError(customErr.FORBIDDEN, "Order not found", http.StatusNotFound, nil)
+		}
+		return nil, customErr.NewError(customErr.UNEXPECTED_ERROR, "Unexpected error", http.StatusInternalServerError, err)
+	}
+
+	return &m, nil
+}
+
+func (d draftOrderGormRepository) GetForSplit(ctx context.Context, id uint) ([]dto.OrderItemForSplit, error) {
+	var m []dto.OrderItemForSplit
+	err := d.db.Table("draft_orders AS do").
+		Select("oi.id AS id, m.id AS merchant_id, dd.delivery_id as delivery_id").
+		Joins("JOIN order_items oi ON do.id = oi.order_id").
+		Joins("JOIN product_variants pv ON pv.id = oi.product_variant_id").
+		Joins("JOIN products p ON p.id = pv.product_id").
+		Joins("JOIN merchants m ON m.id = p.merchant_id").
+		Joins("JOIN delivery_details dd on dd.order_id = do.id").
+		Where("do.id = ? AND dd.order_type=? AND oi.order_type=?", id, models.OrderTypeDraftOrder, models.OrderTypeDraftOrder).
+		Scan(&m).Error
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+
 }

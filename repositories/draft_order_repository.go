@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"context"
+	"github.com/minh6824pro/nxrGO/dto"
 	"github.com/minh6824pro/nxrGO/models"
 	"gorm.io/gorm"
 )
@@ -16,4 +17,6 @@ type DraftOrderRepository interface {
 	CleanDraft(ctx context.Context) error
 	ListByUserIdToOrderNull(ctx context.Context, draftOrderID uint) ([]*models.DraftOrder, error)
 	ListByAdmin(ctx context.Context) ([]*models.DraftOrder, error)
+	GetByParentId(ctx context.Context, parentId uint) ([]models.DraftOrder, error)
+	GetForSplit(ctx context.Context, id uint) ([]dto.OrderItemForSplit, error)
 }

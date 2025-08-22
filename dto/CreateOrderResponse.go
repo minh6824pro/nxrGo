@@ -23,7 +23,7 @@ type OrderData struct {
 	CreatedAt       time.Time           `json:"CreatedAt"`
 	UpdatedAt       time.Time           `json:"UpdatedAt"`
 	OrderType       models.OrderType    `json:"order_type"`
-	ParentID        *uint               `json:"parent_id"`
+	ParentID        *uint               `json:"-"`
 }
 
 type PaymentInfoResponse struct {

@@ -76,6 +76,10 @@ func (p paymentInfoGormRepository) GetByIdAndUserIdAndOrderId(
 		if err := p.db.WithContext(c).
 			Table("orders").
 			Preload("OrderItems").
+			Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
+				return db.Order("created_at DESC")
+			}).
+			Preload("Delivery").
 			Where("id = ? AND user_id = ?", pm.OrderID, userId).
 			First(&order).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -89,6 +93,10 @@ func (p paymentInfoGormRepository) GetByIdAndUserIdAndOrderId(
 		if err := p.db.WithContext(c).
 			Table("draft_orders").
 			Preload("OrderItems").
+			Preload("PaymentInfos", func(db *gorm.DB) *gorm.DB {
+				return db.Order("created_at DESC")
+			}).
+			Preload("Delivery").
 			Where("id = ? AND user_id = ?", pm.OrderID, userId).
 			First(&draft).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

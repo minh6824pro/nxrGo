@@ -323,7 +323,6 @@ func (productService *productService) GetProductList(ctx context.Context, priceM
 
 	// GetDB
 	listProductFilter, total, err := productService.productRepo.GetProductListFilterOptimized(ctx, priceMin, priceMax, priceAsc, totalBuyDesc, page, pageSize)
-	log.Printf("Product list: %v", listProductFilter)
 	if err != nil {
 		return nil, 0, customErr.NewError(customErr.UNEXPECTED_ERROR, "Failed to get product list", http.StatusInternalServerError, err)
 	}
@@ -342,7 +341,6 @@ func (productService *productService) GetProductListManagement(ctx context.Conte
 
 	// GetDB
 	listProductFilter, total, err := productService.productRepo.GetProductListFilter(ctx, priceMin, priceMax, priceAsc, totalBuyDesc, page, pageSize)
-	log.Printf("Product list: %v", listProductFilter)
 	if err != nil {
 		return nil, 0, customErr.NewError(customErr.UNEXPECTED_ERROR, "Failed to get product list", http.StatusInternalServerError, err)
 	}
