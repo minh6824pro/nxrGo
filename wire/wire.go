@@ -6,123 +6,123 @@ package wire
 import (
 	"context"
 	"github.com/google/wire"
-	"github.com/minh6824pro/nxrGO/cache"
-	"github.com/minh6824pro/nxrGO/controllers"
-	"github.com/minh6824pro/nxrGO/event"
-	"github.com/minh6824pro/nxrGO/jwt"
-	"github.com/minh6824pro/nxrGO/middleware"
-	"github.com/minh6824pro/nxrGO/modules"
-	repoImpl "github.com/minh6824pro/nxrGO/repositories/impl"
-	serviceImpl "github.com/minh6824pro/nxrGO/services/impl"
+	controllers2 "github.com/minh6824pro/nxrGO/api/handler/controllers"
+	"github.com/minh6824pro/nxrGO/api/middleware"
+	cache2 "github.com/minh6824pro/nxrGO/internal/cache"
+	event2 "github.com/minh6824pro/nxrGO/internal/event"
+	"github.com/minh6824pro/nxrGO/internal/jwt"
+	modules2 "github.com/minh6824pro/nxrGO/internal/modules"
+	"github.com/minh6824pro/nxrGO/internal/repositories/impl"
+	impl2 "github.com/minh6824pro/nxrGO/internal/services/impl"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
-func InitAuthModule(db *gorm.DB) *modules.AuthModule {
+func InitAuthModule(db *gorm.DB) *modules2.AuthModule {
 	wire.Build(
-		repoImpl.NewAuthRepository,
-		serviceImpl.NewAuthService,
+		impl.NewAuthRepository,
+		impl2.NewAuthService,
 		jwt.NewJWTService,
 		middleware.NewAuthMiddleware,
-		controllers.NewAuthController,
-		wire.Struct(new(modules.AuthModule), "*"))
+		controllers2.NewAuthController,
+		wire.Struct(new(modules2.AuthModule), "*"))
 	return nil
 }
 
-func InitMerchantModule(db *gorm.DB) *modules.MerchantModule {
+func InitMerchantModule(db *gorm.DB) *modules2.MerchantModule {
 	wire.Build(
-		repoImpl.NewMerchantGormRepository,
-		serviceImpl.NewMerchantService,
-		controllers.NewMerchantController,
-		wire.Struct(new(modules.MerchantModule), "*"))
+		impl.NewMerchantGormRepository,
+		impl2.NewMerchantService,
+		controllers2.NewMerchantController,
+		wire.Struct(new(modules2.MerchantModule), "*"))
 	return nil
 }
 
-func InitBrandModule(db *gorm.DB) *modules.BrandModule {
+func InitBrandModule(db *gorm.DB) *modules2.BrandModule {
 	wire.Build(
-		repoImpl.NewBrandGormRepository,
-		serviceImpl.NewBrandService,
-		controllers.NewBrandController,
-		wire.Struct(new(modules.BrandModule), "*"))
+		impl.NewBrandGormRepository,
+		impl2.NewBrandService,
+		controllers2.NewBrandController,
+		wire.Struct(new(modules2.BrandModule), "*"))
 	return nil
 }
 
-func InitCategoryModule(db *gorm.DB) *modules.CategoryModule {
+func InitCategoryModule(db *gorm.DB) *modules2.CategoryModule {
 	wire.Build(
-		repoImpl.NewCategoryGormRepository,
-		serviceImpl.NewCategoryService,
-		controllers.NewCategoryController,
-		wire.Struct(new(modules.CategoryModule), "*"))
+		impl.NewCategoryGormRepository,
+		impl2.NewCategoryService,
+		controllers2.NewCategoryController,
+		wire.Struct(new(modules2.CategoryModule), "*"))
 	return nil
 }
 
-func InitProductModule(db *gorm.DB, redisClient *redis.Client, redisContext context.Context, updateStockAgg *event.UpdateStockAggregator) *modules.ProductModule {
+func InitProductModule(db *gorm.DB, redisClient *redis.Client, redisContext context.Context, updateStockAgg *event2.UpdateStockAggregator) *modules2.ProductModule {
 	wire.Build(
-		repoImpl.NewProductGormRepository,
-		repoImpl.NewMerchantGormRepository,
-		repoImpl.NewCategoryGormRepository,
-		repoImpl.NewBrandGormRepository,
-		repoImpl.NewProductVariantGormRepository,
-		repoImpl.NewVariantOptionGormRepository,
-		repoImpl.NewVariantOptionValueGormRepository,
-		cache.NewProductVariantRedisService,
-		cache.NewProductCacheService,
-		serviceImpl.NewProductVariantService,
-		serviceImpl.NewProductService,
-		controllers.NewProductController,
-		wire.Struct(new(modules.ProductModule), "*"))
+		impl.NewProductGormRepository,
+		impl.NewMerchantGormRepository,
+		impl.NewCategoryGormRepository,
+		impl.NewBrandGormRepository,
+		impl.NewProductVariantGormRepository,
+		impl.NewVariantOptionGormRepository,
+		impl.NewVariantOptionValueGormRepository,
+		cache2.NewProductVariantRedisService,
+		cache2.NewProductCacheService,
+		impl2.NewProductVariantService,
+		impl2.NewProductService,
+		controllers2.NewProductController,
+		wire.Struct(new(modules2.ProductModule), "*"))
 	return nil
 }
 
-func InitVariantModule(db *gorm.DB) *modules.VariantModule {
+func InitVariantModule(db *gorm.DB) *modules2.VariantModule {
 	wire.Build(
-		repoImpl.NewVariantOptionGormRepository,
-		serviceImpl.NewVariantOptionService,
-		controllers.NewVariantOptionController,
-		wire.Struct(new(modules.VariantModule), "*"))
+		impl.NewVariantOptionGormRepository,
+		impl2.NewVariantOptionService,
+		controllers2.NewVariantOptionController,
+		wire.Struct(new(modules2.VariantModule), "*"))
 	return nil
 }
 
-func InitOrderModule(db *gorm.DB, redisClient *redis.Client, redisContext context.Context, eventBus event.EventPublisher, updateStockAgg *event.UpdateStockAggregator) *modules.OrderModule {
+func InitOrderModule(db *gorm.DB, redisClient *redis.Client, redisContext context.Context, eventBus event2.EventPublisher, updateStockAgg *event2.UpdateStockAggregator) *modules2.OrderModule {
 	wire.Build(
-		repoImpl.NewProductVariantGormRepository,
-		repoImpl.NewOrderItemGormRepository,
-		repoImpl.NewOrderGormRepository,
-		repoImpl.NewDraftOrderGormRepository,
-		repoImpl.NewPaymentInfoGormImpl,
-		repoImpl.NewMerchantGormRepository,
-		cache.NewProductVariantRedisService,
-		serviceImpl.NewOrderService,
-		controllers.NewOrderController,
+		impl.NewProductVariantGormRepository,
+		impl.NewOrderItemGormRepository,
+		impl.NewOrderGormRepository,
+		impl.NewDraftOrderGormRepository,
+		impl.NewPaymentInfoGormImpl,
+		impl.NewMerchantGormRepository,
+		cache2.NewProductVariantRedisService,
+		impl2.NewOrderService,
+		controllers2.NewOrderController,
 		jwt.NewJWTService,
 		middleware.NewAuthMiddleware,
-		wire.Struct(new(modules.OrderModule), "*"))
+		wire.Struct(new(modules2.OrderModule), "*"))
 	return nil
 }
 
-func InitProductVariantModule(db *gorm.DB, redisClient *redis.Client, redisContext context.Context, updateStockAgg *event.UpdateStockAggregator) *modules.ProductVariantModule {
+func InitProductVariantModule(db *gorm.DB, redisClient *redis.Client, redisContext context.Context, updateStockAgg *event2.UpdateStockAggregator) *modules2.ProductVariantModule {
 	wire.Build(
-		repoImpl.NewProductVariantGormRepository,
-		repoImpl.NewProductGormRepository,
-		cache.NewProductVariantRedisService,
-		serviceImpl.NewProductVariantService,
-		controllers.NewProductVariantController,
-		wire.Struct(new(modules.ProductVariantModule), "*"))
+		impl.NewProductVariantGormRepository,
+		impl.NewProductGormRepository,
+		cache2.NewProductVariantRedisService,
+		impl2.NewProductVariantService,
+		controllers2.NewProductVariantController,
+		wire.Struct(new(modules2.ProductVariantModule), "*"))
 
 	return nil
 }
 
-func InitPayOSModule(db *gorm.DB, redisClient *redis.Client, redisContext context.Context, eventBus event.EventPublisher, updateStockAgg *event.UpdateStockAggregator) *modules.PayOsModule {
+func InitPayOSModule(db *gorm.DB, redisClient *redis.Client, redisContext context.Context, eventBus event2.EventPublisher, updateStockAgg *event2.UpdateStockAggregator) *modules2.PayOsModule {
 	wire.Build(
-		repoImpl.NewProductVariantGormRepository,
-		repoImpl.NewOrderItemGormRepository,
-		repoImpl.NewOrderGormRepository,
-		repoImpl.NewPaymentInfoGormImpl,
-		repoImpl.NewMerchantGormRepository,
-		repoImpl.NewDraftOrderGormRepository,
-		cache.NewProductVariantRedisService,
-		serviceImpl.NewOrderService,
-		controllers.NewWebhookController,
-		wire.Struct(new(modules.PayOsModule), "*"))
+		impl.NewProductVariantGormRepository,
+		impl.NewOrderItemGormRepository,
+		impl.NewOrderGormRepository,
+		impl.NewPaymentInfoGormImpl,
+		impl.NewMerchantGormRepository,
+		impl.NewDraftOrderGormRepository,
+		cache2.NewProductVariantRedisService,
+		impl2.NewOrderService,
+		controllers2.NewWebhookController,
+		wire.Struct(new(modules2.PayOsModule), "*"))
 	return nil
 }
