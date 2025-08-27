@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"github.com/minh6824pro/nxrGO/internal/cache"
 	"github.com/minh6824pro/nxrGO/internal/dto"
+	"github.com/minh6824pro/nxrGO/internal/elastic"
+	"github.com/minh6824pro/nxrGO/internal/elastic/document"
 	"github.com/minh6824pro/nxrGO/internal/models"
 	"github.com/minh6824pro/nxrGO/internal/models/CacheModel"
 	repositories "github.com/minh6824pro/nxrGO/internal/repositories"
 	services "github.com/minh6824pro/nxrGO/internal/services"
 	"github.com/minh6824pro/nxrGO/internal/utils"
+	"strconv"
 
 	customErr "github.com/minh6824pro/nxrGO/pkg/errors"
 	"gorm.io/gorm"
@@ -22,7 +25,7 @@ import (
 func NewProductService(db *gorm.DB, productRepo repositories.ProductRepository, brandRepo repositories.BrandRepository, merchanRepo repositories.MerchantRepository,
 	categoryRepo repositories.CategoryRepository, productVariantRepo repositories.ProductVariantRepository, variantOptionValueRepo repositories.VariantOptionValueRepository,
 	variantOptionRepo repositories.VariantOptionRepository, productCache cache.ProductCacheService,
-	productVariantService services.ProductVariantService) services.ProductService {
+	productVariantService services.ProductVariantService, elastic elastic.ProductElasticRepository) services.ProductService {
 	return &productService{
 		db:                     db,
 		productRepo:            productRepo,
@@ -34,6 +37,7 @@ func NewProductService(db *gorm.DB, productRepo repositories.ProductRepository, 
 		variantOptionRepo:      variantOptionRepo,
 		productCacheService:    productCache,
 		productVariantService:  productVariantService,
+		elasticProductRepo:     elastic,
 	}
 }
 
@@ -48,6 +52,7 @@ type productService struct {
 	variantOptionRepo      repositories.VariantOptionRepository
 	productVariantService  services.ProductVariantService
 	productCacheService    cache.ProductCacheService
+	elasticProductRepo     elastic.ProductElasticRepository
 }
 
 //	func (productService *productService) Create(ctx context.Context, input dto.CreateProductInput) (*models.Product, error) {
@@ -318,10 +323,18 @@ func (productService *productService) getOrCreateMerchant(ctx context.Context, t
 	return merchant.ID, nil
 }
 
-func (productService *productService) GetProductList(ctx context.Context, priceMin, priceMax *float64,
-	priceAsc *bool, totalBuyDesc *bool, page, pageSize int) ([]*CacheModel.ProductMiniCache, int, error) {
+func (productService *productService) GetProductList(ctx context.Context, name string, priceMin, priceMax *float64,
+	priceAsc *bool, totalBuyDesc *bool, page, pageSize int, lat, lon *float64) ([]*CacheModel.ProductMiniCache, int, error) {
 	var ListProductCache []*CacheModel.ProductMiniCache
 
+	//// Elastic
+	listProductElastic, totalPages, _, err := productService.elasticProductRepo.GetProductList(ctx, name, priceMin, priceMax, priceAsc, totalBuyDesc, page, pageSize, lat, lon)
+	if err != nil {
+		log.Println("Elastic failed, fallback DB, ", err)
+	} else {
+		log.Println("Elastic success")
+		return MapElasticDocsToProductMiniCache(listProductElastic), totalPages, nil
+	}
 	// GetDB
 	listProductFilter, total, err := productService.productRepo.GetProductListFilterOptimized(ctx, priceMin, priceMax, priceAsc, totalBuyDesc, page, pageSize)
 	if err != nil {
@@ -334,6 +347,33 @@ func (productService *productService) GetProductList(ctx context.Context, priceM
 		ListProductCache, err = productService.GetProductCacheInfo(ctx, listProductFilter)
 	}
 	return ListProductCache, total, nil
+}
+
+func MapElasticDocsToProductMiniCache(productElastic []document.ProductDocument) []*CacheModel.ProductMiniCache {
+	var productCaches []*CacheModel.ProductMiniCache
+	for _, product := range productElastic {
+		pID := uint(0)
+		if product.ID != "" {
+			if tmp, err := strconv.ParseUint(product.ID, 10, 32); err == nil {
+				pID = uint(tmp)
+			}
+		}
+		product := &CacheModel.ProductMiniCache{
+			ID:            pID,
+			Name:          product.Name,
+			AverageRating: product.AverageRating,
+			NumberRating:  product.NumberRating,
+			Image:         product.Image,
+			TotalBuy:      product.TotalBuy,
+			Price:         product.Price[0],
+			Location:      product.Location,
+			Merchant:      product.Merchant,
+			Brand:         product.Brand,
+			Category:      product.Category,
+		}
+		productCaches = append(productCaches, product)
+	}
+	return productCaches
 }
 
 func (productService *productService) GetProductListManagement(ctx context.Context, priceMin, priceMax *float64,
@@ -473,6 +513,8 @@ func (productService *productService) GetProductInfo(
 	if err := productService.db.WithContext(ctx).
 		Preload("Variants").
 		Preload("Merchant").
+		Preload("Category").
+		Preload("Brand").
 		Where("id IN ?", ids).
 		Find(&products).Error; err != nil {
 		return nil, err
@@ -527,9 +569,11 @@ func (productService *productService) GetProductInfo(
 
 		// Lấy price từ variantID được chỉ định trong list
 		var price float64
+		var variantId uint
 		if vID, ok := productVariantIDMap[item.ProductID]; ok {
 			if pv, ok := variantMap[vID]; ok {
 				price = pv.Price
+				variantId = vID
 			}
 		}
 
@@ -544,6 +588,10 @@ func (productService *productService) GetProductInfo(
 			TotalQuantity: totalQuantity,
 			Price:         price,
 			Location:      prod.Merchant.Location,
+			VariantId:     variantId,
+			Merchant:      prod.Merchant.Name,
+			Category:      prod.Category.Name,
+			Brand:         prod.Brand.Name,
 		})
 	}
 

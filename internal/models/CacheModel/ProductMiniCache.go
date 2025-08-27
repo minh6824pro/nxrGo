@@ -10,4 +10,8 @@ type ProductMiniCache struct {
 	TotalQuantity uint    `json:"total_quantity"`
 	Price         float64 `json:"price"`
 	Location      string  `json:"location"`
+	Merchant      string  `json:"merchant"`
+	Brand         string  `json:"brand"`
+	Category      string  `json:"category"`
+	VariantId     uint    `json:"variant_id"`
 }

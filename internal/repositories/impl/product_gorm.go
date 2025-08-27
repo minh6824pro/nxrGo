@@ -2,10 +2,10 @@ package impl
 
 import (
 	"context"
+	"fmt"
 	"github.com/minh6824pro/nxrGO/internal/models"
 	"github.com/minh6824pro/nxrGO/internal/models/CacheModel"
 	"github.com/minh6824pro/nxrGO/internal/repositories"
-
 	"github.com/minh6824pro/nxrGO/pkg/errors"
 	"gorm.io/gorm"
 	"net/http"
@@ -209,33 +209,45 @@ func (r *productGormRepository) GetProductListFilterOptimized(
 	page, pageSize int,
 ) ([]CacheModel.ListProductQueryCache, int, error) {
 
-	// subquery với ROW_NUMBER() để chọn 1 variant duy nhất cho mỗi product (order by price, id)
-	ranked := r.db.Raw(`
-  SELECT id, product_id, price, available_qty FROM (
-    SELECT
-      v.id,
-      v.product_id,
-      v.price,
-      get_available_quantity(v.id) AS available_qty,
-      ROW_NUMBER() OVER (PARTITION BY v.product_id ORDER BY v.price ASC, v.id ASC) AS rn
-    FROM product_variants v
-    WHERE get_available_quantity(v.id) > 0
-  ) t
-  WHERE t.rn = 1
-`)
-	// Filter giá min/max
+	// Chuẩn bị điều kiện filter giá
+	priceCond := ""
+	args := []interface{}{}
+
 	if priceMin != nil {
-		ranked = ranked.Where("v.price >= ?", *priceMin)
+		priceCond += " AND v.price >= ?"
+		args = append(args, *priceMin)
 	}
 	if priceMax != nil {
-		ranked = ranked.Where("v.price <= ?", *priceMax)
+		priceCond += " AND v.price <= ?"
+		args = append(args, *priceMax)
 	}
+
+	// subquery: lấy variant rẻ nhất (rn=1) đã lọc theo price
+	subQuery := r.db.Raw(fmt.Sprintf(`
+		SELECT id, product_id, price, available_qty
+		FROM (
+			SELECT
+				v.id,
+				v.product_id,
+				v.price,
+				get_available_quantity(v.id) AS available_qty,
+				ROW_NUMBER() OVER (
+					PARTITION BY v.product_id
+					ORDER BY v.price ASC, v.id ASC
+				) AS rn
+			FROM product_variants v
+			WHERE get_available_quantity(v.id) > 0
+			%s
+		) t
+		WHERE t.rn = 1
+	`, priceCond), args...)
 
 	// Main query
 	query := r.db.WithContext(ctx).
 		Table("products p").
-		Joins("JOIN (?) rv ON rv.product_id = p.id", ranked).
+		Joins("JOIN (?) rv ON rv.product_id = p.id", subQuery).
 		Where("p.deleted_at IS NULL AND p.active = 1")
+
 	// Count total
 	var totalItem int64
 	if err := query.Select("COUNT(DISTINCT p.id)").Count(&totalItem).Error; err != nil {

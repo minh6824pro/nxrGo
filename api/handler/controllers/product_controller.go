@@ -123,9 +123,12 @@ func (pc *ProductController) Delete(ctx *gin.Context) {
 // @Router       /products/query [post]
 func (pc *ProductController) ListProductQuery(ctx *gin.Context) {
 	// Lấy query param
+	name := ctx.Query("name")
 	priceMinStr := ctx.Query("priceMin") // string
 	priceMaxStr := ctx.Query("priceMax")
 	priceAscStr := ctx.Query("priceAsc")
+	latStr := ctx.Query("lat")
+	lonStr := ctx.Query("lon")
 	filterTotalBuyStr := ctx.Query("totalBuyDesc")
 	pageStr := ctx.DefaultQuery("page", "0")
 	pageSizeStr := ctx.DefaultQuery("pageSize", "16")
@@ -148,7 +151,23 @@ func (pc *ProductController) ListProductQuery(ctx *gin.Context) {
 		}
 		priceMax = &v
 	}
-
+	var lat, lon *float64
+	if latStr != "" {
+		v, err := strconv.ParseFloat(latStr, 64)
+		if err != nil {
+			ctx.JSON(400, gin.H{"error": "latitude invalid"})
+			return
+		}
+		lat = &v
+	}
+	if lonStr != "" {
+		v, err := strconv.ParseFloat(lonStr, 64)
+		if err != nil {
+			ctx.JSON(400, gin.H{"error": "longitude invalid"})
+			return
+		}
+		lon = &v
+	}
 	// Parse bool pointer
 	var priceAsc, filterTotalBuy *bool
 	if priceAscStr != "" {
@@ -184,7 +203,7 @@ func (pc *ProductController) ListProductQuery(ctx *gin.Context) {
 		return
 	}
 	// Gọi service
-	products, total, err := pc.service.GetProductList(ctx, priceMin, priceMax, priceAsc, filterTotalBuy, page, pageSize)
+	products, total, err := pc.service.GetProductList(ctx, name, priceMin, priceMax, priceAsc, filterTotalBuy, page, pageSize, lat, lon)
 	if err != nil {
 		ctx.JSON(500, gin.H{"error": err.Error()})
 		log.Println(err)

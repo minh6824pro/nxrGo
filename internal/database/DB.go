@@ -27,6 +27,6 @@ func ConnectDatabase() {
 	sqlDB.SetConnMaxLifetime(30 * time.Minute)
 	sqlDB.SetConnMaxIdleTime(10 * time.Minute)
 
-	DB = database.Debug()
+	DB = database
 	log.Println("Database connected with pool config")
 }

@@ -6,7 +6,7 @@ import (
 )
 
 type ProductCacheService interface {
-	GetProductMiniCache(ctx context.Context, productID uint) (*CacheModel.ProductMiniCache, error)
+	GetProductMiniCache(ctx context.Context, productID uint, variantID uint) (*CacheModel.ProductMiniCache, error)
 	GetProductMiniCacheBulk(ctx context.Context, list []CacheModel.ListProductQueryCache) ([]*CacheModel.ProductMiniCache, []CacheModel.ListProductQueryCache, error)
 	CacheMiniProduct(ctx context.Context, product *CacheModel.ProductMiniCache) error
 	CacheMiniProducts(ctx context.Context, products []*CacheModel.ProductMiniCache) error

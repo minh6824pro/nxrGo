@@ -17,7 +17,7 @@ type productCacheServiceImpl struct {
 }
 
 const (
-	productMiniCacheKeyPattern = "productMiniInfo:%d"
+	productMiniCacheKeyPattern = "productMiniInfo:%d.productVariant:%d"
 	ListProductCacheKeyPattern = "priceMin:%s|priceMax:%s|priceAsc:%s|totalBuyDesc:%s|page:%d|pageSize:%d"
 )
 const ttl = 1 * time.Hour
@@ -33,8 +33,8 @@ func NewProductCacheService(rdb *redis.Client, repo repositories.ProductReposito
 }
 
 // Get key
-func (s *productCacheServiceImpl) getCacheKey(id uint) string {
-	return fmt.Sprintf(productMiniCacheKeyPattern, id)
+func (s *productCacheServiceImpl) getCacheKey(productId uint, variantId uint) string {
+	return fmt.Sprintf(productMiniCacheKeyPattern, productId, variantId)
 }
 
 func (s *productCacheServiceImpl) GetAllProductId(ctx context.Context) ([]uint, error) {
@@ -92,8 +92,8 @@ func (s *productCacheServiceImpl) CacheListProduct(ctx context.Context, key stri
 }
 
 // Lấy cache theo product ID
-func (s *productCacheServiceImpl) GetProductMiniCache(ctx context.Context, productID uint) (*CacheModel.ProductMiniCache, error) {
-	key := fmt.Sprintf(productMiniCacheKeyPattern, productID)
+func (s *productCacheServiceImpl) GetProductMiniCache(ctx context.Context, productID uint, variantID uint) (*CacheModel.ProductMiniCache, error) {
+	key := fmt.Sprintf(productMiniCacheKeyPattern, productID, variantID)
 	cachedData, err := s.rdb.Get(ctx, key).Result()
 	if err != nil {
 		if err == redis.Nil {
@@ -115,17 +115,12 @@ func (s *productCacheServiceImpl) GetProductMiniCacheBulk(
 	list []CacheModel.ListProductQueryCache,
 ) ([]*CacheModel.ProductMiniCache, []CacheModel.ListProductQueryCache, error) {
 
-	ids := make([]uint, len(list))
-	for i, item := range list {
-		ids[i] = item.ProductID
-	}
-
-	results := make([]*CacheModel.ProductMiniCache, len(ids))
+	results := make([]*CacheModel.ProductMiniCache, len(list))
 	var missing []CacheModel.ListProductQueryCache
 
-	keys := make([]string, len(ids))
-	for i, id := range ids {
-		keys[i] = fmt.Sprintf(productMiniCacheKeyPattern, id)
+	keys := make([]string, len(list))
+	for i, item := range list {
+		keys[i] = fmt.Sprintf(productMiniCacheKeyPattern, item.ProductID, item.VariantID)
 	}
 
 	cachedValues, err := s.rdb.MGet(ctx, keys...).Result()
@@ -153,7 +148,7 @@ func (s *productCacheServiceImpl) GetProductMiniCacheBulk(
 
 // Lưu cache cho product ID
 func (s *productCacheServiceImpl) CacheMiniProduct(ctx context.Context, product *CacheModel.ProductMiniCache) error {
-	key := fmt.Sprintf(productMiniCacheKeyPattern, product.ID)
+	key := fmt.Sprintf(productMiniCacheKeyPattern, product.ID, product.VariantId)
 	jsonData, err := json.Marshal(product)
 	if err != nil {
 		return err
@@ -166,7 +161,7 @@ func (s *productCacheServiceImpl) CacheMiniProducts(ctx context.Context, product
 	pipe := s.rdb.Pipeline()
 
 	for _, product := range products {
-		key := fmt.Sprintf(productMiniCacheKeyPattern, product.ID)
+		key := fmt.Sprintf(productMiniCacheKeyPattern, product.ID, product.VariantId)
 		jsonData, err := json.Marshal(product)
 		if err != nil {
 			return err

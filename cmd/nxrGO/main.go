@@ -11,9 +11,10 @@ import (
 	"github.com/minh6824pro/nxrGO/internal/cache"
 	"github.com/minh6824pro/nxrGO/internal/config"
 	"github.com/minh6824pro/nxrGO/internal/database"
+	"github.com/minh6824pro/nxrGO/internal/elastic"
 	"github.com/minh6824pro/nxrGO/internal/event"
 	"github.com/minh6824pro/nxrGO/internal/models"
-	"github.com/minh6824pro/nxrGO/wire"
+	"github.com/minh6824pro/nxrGO/internal/wire"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"gorm.io/gorm"
@@ -53,6 +54,16 @@ func main() {
 	config.GetSnowflakeNode()
 	// Create cache
 	config.InitRedis()
+	// Init elastic
+	config.InitElastic()
+	elasticClient := elastic.NewElasticClient()
+	err = elasticClient.EnsureProductIndex(context.Background())
+	if err != nil {
+		log.Println(err)
+	}
+	// Convert DB to Elastic Document
+	elasticRepo := elastic.NewProductElasticRepo()
+	elasticRepo.DBToElastic(context.Background())
 
 	// Init necessary dependency
 	eventPub := event.NewChannelEventPublisher()
@@ -84,7 +95,7 @@ func main() {
 	merchant := wire.InitMerchantModule(db)
 	brand := wire.InitBrandModule(db)
 	category := wire.InitCategoryModule(db)
-	product := wire.InitProductModule(db, config.RedisClient, config.RedisCtx, updateStockAgg)
+	product := wire.InitProductModule(db, config.RedisClient, config.EsClient, config.RedisCtx, updateStockAgg)
 	variant := wire.InitVariantModule(db)
 	order := wire.InitOrderModule(db, config.RedisClient, config.RedisCtx, eventPub, updateStockAgg)
 	productVariant := wire.InitProductVariantModule(db, config.RedisClient, config.RedisCtx, updateStockAgg)

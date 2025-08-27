@@ -5,10 +5,12 @@ package wire
 
 import (
 	"context"
+	"github.com/elastic/go-elasticsearch/v8"
 	"github.com/google/wire"
 	controllers2 "github.com/minh6824pro/nxrGO/api/handler/controllers"
 	"github.com/minh6824pro/nxrGO/api/middleware"
 	cache2 "github.com/minh6824pro/nxrGO/internal/cache"
+	"github.com/minh6824pro/nxrGO/internal/elastic"
 	event2 "github.com/minh6824pro/nxrGO/internal/event"
 	"github.com/minh6824pro/nxrGO/internal/jwt"
 	modules2 "github.com/minh6824pro/nxrGO/internal/modules"
@@ -56,7 +58,7 @@ func InitCategoryModule(db *gorm.DB) *modules2.CategoryModule {
 	return nil
 }
 
-func InitProductModule(db *gorm.DB, redisClient *redis.Client, redisContext context.Context, updateStockAgg *event2.UpdateStockAggregator) *modules2.ProductModule {
+func InitProductModule(db *gorm.DB, redisClient *redis.Client, es *elasticsearch.Client, redisContext context.Context, updateStockAgg *event2.UpdateStockAggregator) *modules2.ProductModule {
 	wire.Build(
 		impl.NewProductGormRepository,
 		impl.NewMerchantGormRepository,
@@ -68,6 +70,7 @@ func InitProductModule(db *gorm.DB, redisClient *redis.Client, redisContext cont
 		cache2.NewProductVariantRedisService,
 		cache2.NewProductCacheService,
 		impl2.NewProductVariantService,
+		elastic.NewProductElasticRepo,
 		impl2.NewProductService,
 		controllers2.NewProductController,
 		wire.Struct(new(modules2.ProductModule), "*"))

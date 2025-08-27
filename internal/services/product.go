@@ -15,5 +15,5 @@ type ProductService interface {
 	Patch(ctx context.Context, product *models.Product) error
 	GetProductListManagement(ctx context.Context, priceMin, priceMax *float64, priceAsc *bool, totalBuyDesc *bool, page, pageSize int) ([]*CacheModel.ProductMiniCache, int, error)
 
-	GetProductList(ctx context.Context, priceMin, priceMax *float64, priceAsc *bool, totalBuyDesc *bool, page, pageSize int) ([]*CacheModel.ProductMiniCache, int, error)
+	GetProductList(ctx context.Context, name string, priceMin, priceMax *float64, priceAsc *bool, totalBuyDesc *bool, page, pageSize int, lat, lon *float64) ([]*CacheModel.ProductMiniCache, int, error)
 }
